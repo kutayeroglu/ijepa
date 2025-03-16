@@ -6,7 +6,7 @@ Official PyTorch codebase for I-JEPA (the **Image-based Joint-Embedding Predicti
 ## Method
 I-JEPA is a method for self-supervised learning. At a high level, I-JEPA predicts the representations of part of an image from the representations of other parts of the same image. Notably, this approach learns semantic image features:
 1. without relying on pre-specified invariances to hand-crafted data transformations, which tend to be biased for particular downstream tasks,
-2. and without having the model fill in pixel-level details, which tend to result in learning less semantically meaningful representations.
+2. and without having the model fill in pixel-level details, which tend to result in learning less semantically meaningful representations. 
 
 ![ijepa](https://github.com/facebookresearch/ijepa/assets/7530871/dbad94ab-ac35-433b-8b4c-ca227886d311)
 
@@ -135,7 +135,7 @@ python main_distributed.py \
 ---
 
 ### Requirements
-* Python 3.8 (or newer)
+* Python >=3.8 <=3.10 (compatibility with PyTorch 2.0)
 * PyTorch 2.0
 * torchvision
 * Other dependencies: pyyaml, numpy, opencv, submitit
