@@ -4,18 +4,20 @@ from collections import OrderedDict
 import torch
 
 from src.models.vision_transformer import vit_huge
-from src.models.linear_probe import LinearProbeModel
-
-
-script_dir = os.path.dirname(__file__)
+from src.models.vit_linear_probe import LinearProbeModel
+from src.datasets.singleGPU_imagenet1k import get_imagenet_dataloaders
 
 
 if __name__ == "__main__":
     # Params
+    script_dir = os.path.dirname(__file__)
     model_dir = os.path.join(script_dir, "pretrained_models")
     model_file_name = "IN1K-vit.h.14-300e.pth.tar"
-
     model_path = os.path.join(model_dir, model_file_name)
+
+    dataset_dir = os.path.join(script_dir, "datasets")
+    in1k_dir = os.path.join(dataset_dir, "in1k")
+
 
     # Read encoder
     try: 
@@ -24,7 +26,7 @@ if __name__ == "__main__":
     except Exception as e:
         print(f"Error loading the model from {model_path}: {e}")
 
-    # NOTE: which one to use from checkpoint: encoder or target_encoder??
+    # NOTE: which one to use from checkpoint: encoder or target_encoder?? why?
     encoder = checkpoint['target_encoder']
     
     # Clean state dict keys
@@ -54,7 +56,13 @@ if __name__ == "__main__":
 
     print("Model created with linear head")
 
-    # Read in1k 
+    # Get dataloaders
+    train_loader, val_loader = get_imagenet_dataloaders(
+        in1k_dir,
+        batch_size=1024,  # NOTE: Adjust based on GPU memory
+        num_workers=8
+    )
+
 
     # Train linear head on in1k-trainset 
 
