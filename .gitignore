@@ -8,3 +8,10 @@ __pycache__
 
 # images
 *.JPEG
+
+# ImageNet artificats
+*.mat
+*.m
+*.gz
+*.txt
+*COPYING
