@@ -3,7 +3,7 @@ import torch.nn as nn
 
 
 class LinearProbeModel(nn.Module):
-    def __init__(self, encoder, embed_dim=1280, num_classes=1000):
+    def __init__(self, encoder, embed_dim, num_classes):
         super().__init__()
         self.encoder = encoder
         self.classifier = nn.Linear(embed_dim, num_classes)

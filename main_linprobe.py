@@ -60,7 +60,7 @@ if __name__ == "__main__":
     train_loader, val_loader = get_imagenet_dataloaders(
         in1k_dir,
         batch_size=32,  # NOTE: Adjust based on GPU memory
-        num_workers=8,
+        num_workers=4,  # NOTE: num_GPU * 4 or os.cpu_count()
     )
 
     # TODO: get params with argparse
