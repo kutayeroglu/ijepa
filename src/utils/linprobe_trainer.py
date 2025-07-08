@@ -4,6 +4,8 @@ import time
 from tqdm import tqdm
 import torch
 import torch.nn as nn
+from torch.optim import AdamW
+from torch.optim.lr_scheduler import StepLR
 
 
 # --- Setup a logger ---
@@ -22,31 +24,29 @@ def train_linear_probe(
     learning_rate,
     device,
 ):
-    """Trains a linear probe with improved logging."""
-    # --- 1. Log Hyperparameters ---
-    logging.info("Starting new training run")
-    logging.info(
-        f"Hyperparameters: num_epochs={num_epochs}, learning_rate={learning_rate}, device='{device}'"
-    )
+    """Training loop"""
+    logging.info("Starting linear probe training")
+    logging.info(f"Hyperparameters: lr={learning_rate}, epochs={num_epochs}")
 
-    # Setup
-    criterion = nn.CrossEntropyLoss()
-    optimizer = torch.optim.SGD(
-        model.classifier.BatchNorm(), lr=learning_rate, momentum=0.9
-    )
-
+    # Mode configuration
+    model.encoder.eval()
     model = model.to(device)
+
+    # NOTE: Paper uses LARS optimizer
+    # Used in large batches
+    # https://paperswithcode.com/method/lars
+    optimizer = AdamW(
+        model.classifier.parameters(), lr=learning_rate, weight_decay=0.0005
+    )
+    scheduler = StepLR(optimizer, step_size=15, gamma=0.1)
+    criterion = nn.CrossEntropyLoss()
+
+    # --- Training ---
     best_acc = 0.0
-    total_start_time = time.time()
-
     for epoch in range(num_epochs):
-        epoch_start_time = time.time()
-
-        # --- 2. Training Loop ---
-        model.train()
+        model.classifier.train()  # Train only the classifier head
         train_loss, train_correct, train_total = 0.0, 0, 0
 
-        # Use tqdm for a progress bar
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Train]")
         for images, labels in train_pbar:
             images, labels = images.to(device), labels.to(device)
@@ -58,25 +58,26 @@ def train_linear_probe(
             loss.backward()
             optimizer.step()
 
+            # Update metrics
             train_loss += loss.item()
             _, predicted = outputs.max(1)
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
 
-            # Update progress bar description
             train_pbar.set_postfix(
                 loss=f"{train_loss / train_total:.4f}",
                 acc=f"{100.0 * train_correct / train_total:.2f}%",
             )
 
-        # --- 3. Validation Loop ---
+        scheduler.step()
+
+        # --- Validation ---
         model.eval()
         val_loss, val_correct, val_total = 0.0, 0, 0
-        val_pbar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Val]")
         with torch.no_grad():
+            val_pbar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Val]")
             for images, labels in val_pbar:
                 images, labels = images.to(device), labels.to(device)
-
                 outputs = model(images)
                 loss = criterion(outputs, labels)
 
@@ -84,34 +85,29 @@ def train_linear_probe(
                 _, predicted = outputs.max(1)
                 val_total += labels.size(0)
                 val_correct += predicted.eq(labels).sum().item()
-                val_pbar.set_postfix(
-                    loss=f"{val_loss / val_total:.4f}",
-                    acc=f"{100.0 * val_correct / val_total:.2f}%",
-                )
+                val_pbar.set_postfix(acc=f"{100.0 * val_correct / val_total:.2f}%")
 
-        # --- 4. Structured Logging for the Epoch ---
-        epoch_duration = time.time() - epoch_start_time
-        train_accuracy = 100.0 * train_correct / train_total
-        val_accuracy = 100.0 * val_correct / val_total
+        # Log epoch results
+        train_acc = 100.0 * train_correct / train_total
+        val_acc = 100.0 * val_correct / val_total
+        logging.info(
+            f"Epoch {epoch + 1}/{num_epochs} | "
+            f"Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}% | "
+            f"LR: {scheduler.get_last_lr()[0]:.6f}"
+        )
 
-        log_metrics = {
-            "epoch": epoch + 1,
-            "train_loss": train_loss / len(train_loader),
-            "train_accuracy": train_accuracy,
-            "val_loss": val_loss / len(val_loader),
-            "val_accuracy": val_accuracy,
-            "duration_seconds": round(epoch_duration, 2),
-        }
-        logging.info(f"Epoch Summary: {log_metrics}")
-
-        # --- 5. Save Best Model and Log It ---
-        if val_accuracy > best_acc:
-            logging.info(
-                f"New best model found! Validation accuracy improved from {best_acc:.2f}% to {val_accuracy:.2f}%. Saving model..."
+        # Save best model
+        if val_acc > best_acc:
+            logging.info(f"New best model! ({val_acc:.2f}% > {best_acc:.2f}%)")
+            best_acc = val_acc
+            torch.save(
+                {
+                    "classifier": model.classifier.state_dict(),
+                    "epoch": epoch + 1,
+                    "val_acc": val_acc,
+                },
+                "best_linear_probe.pth",
             )
-            best_acc = val_accuracy
-            torch.save(model.state_dict(), "best_linear_probe.pth")
 
-    total_duration = time.time() - total_start_time
-    logging.info(f"Training finished in {total_duration:.2f} seconds.")
-    logging.info(f"Best validation accuracy: {best_acc:.2f}%")
+    logging.info(f"Training complete. Best validation accuracy: {best_acc:.2f}%")
+    return best_acc

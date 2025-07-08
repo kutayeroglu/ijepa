@@ -61,6 +61,8 @@ if __name__ == "__main__":
         in1k_dir,
         batch_size=32,  # NOTE: Adjust based on GPU memory
         num_workers=4,  # NOTE: num_GPU * 4 or os.cpu_count()
+        train_frac=0.025,
+        val_frac=0.1,
     )
 
     # TODO: get params with argparse
@@ -69,7 +71,7 @@ if __name__ == "__main__":
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
-        num_epochs=50,
+        num_epochs=10,
         learning_rate=0.1,
         device="cuda",
     )

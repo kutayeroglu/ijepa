@@ -3,10 +3,15 @@ import os
 import torch
 from torch.utils.data import DataLoader
 from torchvision import datasets, transforms
+from torch.utils.data import SubsetRandomSampler
 
 
 def get_imagenet_dataloaders(
-    data_dir, batch_size=1024, num_workers=8, distributed=False
+    data_dir,
+    batch_size=1024,
+    num_workers=8,
+    train_frac: float = None,
+    val_frac: float = None,
 ):
     """Create ImageNet dataloaders with appropriate transforms"""
 
@@ -42,11 +47,17 @@ def get_imagenet_dataloaders(
     train_sampler = None
     val_sampler = None
 
-    if distributed:
-        train_sampler = torch.utils.data.distributed.DistributedSampler(train_dataset)
-        val_sampler = torch.utils.data.distributed.DistributedSampler(
-            val_dataset, shuffle=False
-        )
+    if train_frac is not None:
+        num = len(train_dataset)
+        # reproducible random split
+        g = torch.Generator().manual_seed(42)
+        indices = torch.randperm(num, generator=g)[: int(num * train_frac)].tolist()
+        train_sampler = SubsetRandomSampler(indices)
+    if val_frac is not None:
+        num = len(val_dataset)
+        g = torch.Generator().manual_seed(43)
+        indices = torch.randperm(num, generator=g)[: int(num * val_frac)].tolist()
+        val_sampler = SubsetRandomSampler(indices)
 
     # Create dataloaders
     # NOTE: for pin_memory = True, see: https://discuss.pytorch.org/t/when-to-set-pin-memory-to-true/19723
