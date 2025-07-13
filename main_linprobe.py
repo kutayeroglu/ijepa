@@ -2,7 +2,6 @@ import logging
 import os
 from datetime import datetime
 from collections import OrderedDict
-from pathlib import Path
 
 import torch
 
@@ -12,15 +11,16 @@ from src.datasets.singleGPU_imagenet1k import get_imagenet_dataloaders
 from src.utils.linprobe_trainer import train_linear_probe
 
 
-# --- SETUP LOGGING CONFIGURATION ---
+# --- SETUP OUTPUT DIRECTORY AND LOGGING ---
 project_name = "ijepa"
-file_name = Path(__file__).name
-log_name = f"{file_name}_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}.log"
+run_name = f"linprobe_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 
-log_dir = os.path.join(os.path.expanduser("~"), "logs", project_name)
-os.makedirs(log_dir, exist_ok=True)
-log_file_path = os.path.join(log_dir, log_name)
+# Create unique run directory
+outputs_dir = os.path.join(os.path.expanduser("~"), "outputs", project_name, run_name)
+os.makedirs(outputs_dir, exist_ok=True)
 
+# Setup logging
+log_file_path = os.path.join(outputs_dir, "training_log")
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s:%(levelname)s] %(message)s",
@@ -88,13 +88,14 @@ if __name__ == "__main__":
 
     # TODO: get params with argparse
     # Train linear head on in1k-trainset
-    train_linear_probe(
+    trained_model = train_linear_probe(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
         num_epochs=1,
         learning_rate=0.1,
         device="cuda",
+        outputs_dir=outputs_dir,
     )
 
-    # Evaluate on in1k-valset
+    # TODO: Evaluate on in1k-valset

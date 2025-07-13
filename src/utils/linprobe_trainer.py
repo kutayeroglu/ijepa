@@ -1,3 +1,4 @@
+import os
 import logging
 
 from tqdm import tqdm
@@ -5,6 +6,8 @@ import torch
 import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import StepLR
+
+from src.utils.plot import plot_loss_curves
 
 
 logger = logging.getLogger(__name__)
@@ -17,6 +20,7 @@ def train_linear_probe(
     num_epochs,
     learning_rate,
     device,
+    outputs_dir,
 ):
     """Training loop"""
     logger.info("Starting linear probe training")
@@ -35,8 +39,9 @@ def train_linear_probe(
     scheduler = StepLR(optimizer, step_size=15, gamma=0.1)
     criterion = nn.CrossEntropyLoss()
 
-    # --- Training ---
+    # --- TRAINING ---
     best_acc = 0.0
+    train_losses, val_losses = [], []
     for epoch in range(num_epochs):
         model.classifier.train()  # Train only the classifier head
         train_loss, train_correct, train_total = 0.0, 0, 0
@@ -63,9 +68,10 @@ def train_linear_probe(
                 acc=f"{100.0 * train_correct / train_total:.2f}%",
             )
 
+        train_losses.append(train_loss / len(train_loader))
         scheduler.step()
 
-        # --- Validation ---
+        # --- VALIDATION ---
         model.eval()
         val_loss, val_correct, val_total = 0.0, 0, 0
         with torch.no_grad():
@@ -81,6 +87,8 @@ def train_linear_probe(
                 val_correct += predicted.eq(labels).sum().item()
                 val_pbar.set_postfix(acc=f"{100.0 * val_correct / val_total:.2f}%")
 
+        val_losses.append(val_loss / len(val_loader))
+
         # Log epoch results
         train_acc = 100.0 * train_correct / train_total
         val_acc = 100.0 * val_correct / val_total
@@ -94,14 +102,24 @@ def train_linear_probe(
         if val_acc > best_acc:
             logger.info(f"New best model! ({val_acc:.2f}% > {best_acc:.2f}%)")
             best_acc = val_acc
+            checkpoint_path = os.path.join(outputs_dir, "best_linear_probe.pth")
             torch.save(
                 {
                     "classifier": model.classifier.state_dict(),
                     "epoch": epoch + 1,
                     "val_acc": val_acc,
                 },
-                "best_linear_probe.pth",
+                checkpoint_path,
             )
 
     logger.info(f"Training complete. Best validation accuracy: {best_acc:.2f}%")
+
+    plot_path = os.path.join(outputs_dir, "training_loss_plot.png")
+    plot_loss_curves(
+        train_losses,
+        val_losses,
+        num_epochs,
+        save_path=plot_path,
+    )
+
     return best_acc
