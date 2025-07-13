@@ -1,5 +1,4 @@
 import logging
-import time
 
 from tqdm import tqdm
 import torch
@@ -8,12 +7,7 @@ from torch.optim import AdamW
 from torch.optim.lr_scheduler import StepLR
 
 
-# --- Setup a logger ---
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler("training.log"), logging.StreamHandler()],
-)
+logger = logging.getLogger(__name__)
 
 
 def train_linear_probe(
@@ -25,8 +19,8 @@ def train_linear_probe(
     device,
 ):
     """Training loop"""
-    logging.info("Starting linear probe training")
-    logging.info(f"Hyperparameters: lr={learning_rate}, epochs={num_epochs}")
+    logger.info("Starting linear probe training")
+    logger.info(f"Hyperparameters: so lr={learning_rate}, epochs={num_epochs}")
 
     # Mode configuration
     model.encoder.eval()
@@ -90,7 +84,7 @@ def train_linear_probe(
         # Log epoch results
         train_acc = 100.0 * train_correct / train_total
         val_acc = 100.0 * val_correct / val_total
-        logging.info(
+        logger.info(
             f"Epoch {epoch + 1}/{num_epochs} | "
             f"Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}% | "
             f"LR: {scheduler.get_last_lr()[0]:.6f}"
@@ -98,7 +92,7 @@ def train_linear_probe(
 
         # Save best model
         if val_acc > best_acc:
-            logging.info(f"New best model! ({val_acc:.2f}% > {best_acc:.2f}%)")
+            logger.info(f"New best model! ({val_acc:.2f}% > {best_acc:.2f}%)")
             best_acc = val_acc
             torch.save(
                 {
@@ -109,5 +103,5 @@ def train_linear_probe(
                 "best_linear_probe.pth",
             )
 
-    logging.info(f"Training complete. Best validation accuracy: {best_acc:.2f}%")
+    logger.info(f"Training complete. Best validation accuracy: {best_acc:.2f}%")
     return best_acc
