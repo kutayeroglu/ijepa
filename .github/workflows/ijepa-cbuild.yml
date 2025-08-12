@@ -20,6 +20,9 @@ jobs:
       packages: write
 
     steps:
+      - name: Delete huge unnecessary tools folder
+        run: rm -rf /opt/hostedtoolcache
+
       - name: Maximize build disk space
         uses: easimon/maximize-build-space@v10
         with:
