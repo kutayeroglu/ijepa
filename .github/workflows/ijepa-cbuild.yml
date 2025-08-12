@@ -20,8 +20,6 @@ jobs:
       packages: write
 
     steps:
-
-    steps:
       - name: Maximize build disk space
         uses: easimon/maximize-build-space@v10
         with:
