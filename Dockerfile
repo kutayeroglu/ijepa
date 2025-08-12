@@ -11,9 +11,9 @@ LABEL maintainer="Kutay Eroglu"
 
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 
-# Install system dependencies
-RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
-    && apt-get -y install --no-install-recommends \
+RUN apt-get update && \
+    export DEBIAN_FRONTEND=noninteractive && \
+    apt-get -y install --no-install-recommends \
     git \
     wget \
     cmake \
@@ -22,14 +22,17 @@ RUN apt-get update && export DEBIAN_FRONTEND=noninteractive \
     python3 \
     python3-dev \
     python3-pip \
-    python-is-python3 \
-    && apt-get autoremove -y && apt-get clean -y && rm -rf /var/lib/apt/lists/* 
+    python-is-python3 && \
+    \
+    # Install Python packages
+    python3 -m pip install --no-cache-dir --upgrade pip && \
+    python3 -m pip install --no-cache-dir torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121 && \
+    \
+    # Clean up APT caches to reduce image size
+    apt-get autoremove -y && \
+    apt-get clean -y && \
+    rm -rf /var/lib/apt/lists/*
 
-RUN python3 -m pip install --upgrade pip
-
-# NEW: Install PyTorch, TorchVision, and TorchAudio for CUDA 12.1
-# This is the most reliable method for getting GPU-enabled versions.
-RUN python3 -m pip install torch==2.5.1 torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 
 COPY requirements.txt .
 
