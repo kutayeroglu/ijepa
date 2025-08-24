@@ -1,0 +1,35 @@
+kutay.eroglu@ultramarine:~/projects/test_slurm$ cat lib_gpu_check-18535.out 
+--- Starting Job: 18535 ---
+Running on host: ultramarine
+Allocated GPUs: 1
+
+--- Checking GPU with nvidia-smi ---
+Sun Aug 24 19:04:05 2025       
++---------------------------------------------------------------------------------------+
+| NVIDIA-SMI 535.247.01             Driver Version: 535.247.01   CUDA Version: 12.2     |
+|-----------------------------------------+----------------------+----------------------+
+| GPU  Name                 Persistence-M | Bus-Id        Disp.A | Volatile Uncorr. ECC |
+| Fan  Temp   Perf          Pwr:Usage/Cap |         Memory-Usage | GPU-Util  Compute M. |
+|                                         |                      |               MIG M. |
+|=========================================+======================+======================|
+|   0  NVIDIA A40                     On  | 00000000:9B:00.0 Off |                    0 |
+|  0%   32C    P8              21W / 300W |      0MiB / 46068MiB |      0%      Default |
+|                                         |                      |                  N/A |
++-----------------------------------------+----------------------+----------------------+
+                                                                                         
++---------------------------------------------------------------------------------------+
+| Processes:                                                                            |
+|  GPU   GI   CI        PID   Type   Process name                            GPU Memory |
+|        ID   ID                                                             Usage      |
+|=======================================================================================|
+|  No running processes found                                                           |
++---------------------------------------------------------------------------------------+
+
+--- Checking Core Libraries and GPU with Python/Torch ---
+Python Version: 3.10.12 (main, May 27 2025, 17:12:29) [GCC 11.4.0]
+Torch Version: 2.5.1+cu121
+--------------------
+Is GPU available via Torch? -> True
+Number of GPUs available: 1
+  GPU 0: NVIDIA A40
+--- Job Finished Successfully ---
