@@ -13,5 +13,8 @@ __pycache__
 *.mat
 *.m
 *.gz
-*.txt
 *COPYING
+
+# Slurm
+*.err
+*.out
