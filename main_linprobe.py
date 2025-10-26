@@ -97,6 +97,9 @@ if __name__ == "__main__":
     if not os.path.exists(in1k_dir):
         in1k_dir = dataset_dir
 
+    logger.info(f"Dataset directory: {dataset_dir}")
+    logger.info(f"Using data from: {in1k_dir}")
+
     # Read encoder
     try:
         checkpoint = torch.load(model_path, map_location="cpu")
