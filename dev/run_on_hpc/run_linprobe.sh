@@ -22,7 +22,12 @@ nvidia-smi
 echo ""
 
 echo "--- Executing main script ---"
-python3 "$HOME/projects/ijepa/main_linprobe.py"
+
+# Set the base dataset directory
+DATA_DIR="/stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC"
+# The code expects DATASET_DIR/in1k structure, so pass the parent directory
+python3 "$HOME/projects/ijepa/main_linprobe.py" \
+    --dataset_dir "$DATA_DIR"
 
 echo "--- Job Finished Successfully ---"
 

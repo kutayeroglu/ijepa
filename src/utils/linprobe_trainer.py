@@ -24,7 +24,7 @@ def train_linear_probe(
 ):
     """Training loop"""
     logger.info("Starting linear probe training")
-    logger.info(f"Hyperparameters: so lr={learning_rate}, epochs={num_epochs}")
+    logger.info(f"Hyperparameters: lr={learning_rate}, epochs={num_epochs}")
 
     # Mode configuration
     model.encoder.eval()
