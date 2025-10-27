@@ -82,6 +82,12 @@ if __name__ == "__main__":
         default="cuda",
         help="Device to use (default: cuda)",
     )
+    parser.add_argument(
+        "--val_labels_file",
+        type=str,
+        default=None,
+        help="Path to ground truth labels file for flat validation structure (default: None)",
+    )
 
     args = parser.parse_args()
 
@@ -144,6 +150,7 @@ if __name__ == "__main__":
         num_workers=args.num_workers,
         train_frac=args.train_frac,
         val_frac=args.val_frac,
+        val_labels_file=args.val_labels_file,
     )
 
     # Train linear head on in1k-trainset
@@ -156,5 +163,3 @@ if __name__ == "__main__":
         device=args.device,
         outputs_dir=outputs_dir,
     )
-
-    # TODO: Evaluate on in1k-valset
