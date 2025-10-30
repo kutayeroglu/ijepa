@@ -1,8 +1,8 @@
 #!/bin/bash
 
 #SBATCH --job-name=eval_lin_probe 
-#SBATCH --output=ijepa/logs/eval_lin_probe-%j.out
-#SBATCH --error=ijepa/logs/eval_lin_probe-%j.err
+#SBATCH --output=logs/eval_lin_probe-%j.out
+#SBATCH --error=logs/eval_lin_probe-%j.err
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
 #SBATCH --container-mounts /stratch/dataset:/datasets
@@ -12,9 +12,6 @@
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
-
-# Ensure logs directory exists
-mkdir -p logs
 
 echo "--- Starting Job: $SLURM_JOB_ID ---"
 echo "Running on host: $(hostname)"
