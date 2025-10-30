@@ -14,7 +14,7 @@
 set -e
 
 # Ensure logs directory exists
-mkdir -p ijepa/logs
+mkdir -p logs
 
 echo "--- Starting Job: $SLURM_JOB_ID ---"
 echo "Running on host: $(hostname)"
@@ -34,6 +34,7 @@ VAL_LABELS_FILE="/users/kutay.eroglu/artifacts/ILSVRC2012_validation_ground_trut
 python3 "$HOME/projects/ijepa/main_linprobe.py" \
     --dataset_dir "$DATA_DIR" \
     --val_labels_file "$VAL_LABELS_FILE"
+    ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"
 
