@@ -30,7 +30,7 @@ VAL_LABELS_FILE="/users/kutay.eroglu/artifacts/ILSVRC2012_validation_ground_trut
 # The code expects DATASET_DIR/in1k structure, so pass the parent directory
 python3 "$HOME/projects/ijepa/main_linprobe.py" \
     --dataset_dir "$DATA_DIR" \
-    --val_labels_file "$VAL_LABELS_FILE"
+    --val_labels_file "$VAL_LABELS_FILE" \
     ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"
