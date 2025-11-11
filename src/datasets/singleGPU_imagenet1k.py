@@ -56,6 +56,7 @@ class ImageNetFlatValDataset(Dataset):
 
 def get_imagenet_dataloaders(
     data_dir,
+    val_dir: Optional[str] = None,
     batch_size=1024,
     num_workers=8,
     train_frac: Optional[float] = None,
@@ -89,18 +90,24 @@ def get_imagenet_dataloaders(
     )
 
     # Handle validation dataset: check if it's in subdirectories or flat structure
-    val_dir = os.path.join(data_dir, "val")
+    resolved_val_dir = val_dir if val_dir is not None else os.path.join(data_dir, "val")
+
+    if not os.path.isdir(resolved_val_dir):
+        raise FileNotFoundError(
+            f"Validation directory not found at: {resolved_val_dir}. "
+            "Provide a valid path via `val_dir`."
+        )
 
     # Check if validation directory has subdirectories
     has_subdirs = any(
-        os.path.isdir(os.path.join(val_dir, item))
-        for item in os.listdir(val_dir)
-        if os.path.isdir(os.path.join(val_dir, item))
+        os.path.isdir(os.path.join(resolved_val_dir, item))
+        for item in os.listdir(resolved_val_dir)
+        if os.path.isdir(os.path.join(resolved_val_dir, item))
     )
 
     if has_subdirs:
         # Use ImageFolder for subdirectory structure (local format)
-        val_dataset = datasets.ImageFolder(val_dir, transform=val_transform)
+        val_dataset = datasets.ImageFolder(resolved_val_dir, transform=val_transform)
         print("Using ImageFolder for validation (subdirectory structure)")
     else:
         # Use custom dataset for flat structure (HPC format)
@@ -118,7 +125,7 @@ def get_imagenet_dataloaders(
             f"Using custom dataset for validation (flat structure) with labels from: {val_labels_file}"
         )
         val_dataset = ImageNetFlatValDataset(
-            val_dir, val_labels_file, transform=val_transform
+            resolved_val_dir, val_labels_file, transform=val_transform
         )
 
     # Create samplers

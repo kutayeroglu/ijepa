@@ -41,6 +41,12 @@ if __name__ == "__main__":
         help="Base directory for datasets (default: ~/datasets)",
     )
     parser.add_argument(
+        "--val_dir",
+        type=str,
+        default=None,
+        help="Optional explicit validation directory (default: dataset_dir/in1k/val or dataset_dir/val)",
+    )
+    parser.add_argument(
         "--batch_size",
         type=int,
         default=32,
@@ -98,6 +104,7 @@ if __name__ == "__main__":
     model_path = os.path.join(model_dir, model_file_name)
 
     dataset_dir = os.path.expanduser(args.dataset_dir)
+    val_dir = os.path.expanduser(args.val_dir) if args.val_dir else None
     # Check if in1k subdirectory exists, otherwise use the dataset_dir directly
     in1k_dir = os.path.join(dataset_dir, "in1k")
     if not os.path.exists(in1k_dir):
@@ -105,6 +112,8 @@ if __name__ == "__main__":
 
     logger.info(f"Dataset directory: {dataset_dir}")
     logger.info(f"Using data from: {in1k_dir}")
+    if val_dir:
+        logger.info(f"Validation directory override: {val_dir}")
 
     # Read encoder
     try:
@@ -150,6 +159,7 @@ if __name__ == "__main__":
         num_workers=args.num_workers,
         train_frac=args.train_frac,
         val_frac=args.val_frac,
+        val_dir=val_dir,
         val_labels_file=args.val_labels_file,
     )
 
