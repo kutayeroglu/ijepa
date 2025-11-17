@@ -23,9 +23,17 @@ echo "--- Checking GPU with nvidia-smi ---"
 nvidia-smi
 echo ""
 
+echo "--- GPU Details ---"
+echo "GPU Name: $(nvidia-smi --query-gpu=name --format=csv,noheader)"
+echo "GPU Memory: $(nvidia-smi --query-gpu=memory.total --format=csv,noheader)"
+echo "GPU Memory Free: $(nvidia-smi --query-gpu=memory.free --format=csv,noheader)"
+echo ""
+
 cd "$HOME/projects/ijepa"
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_GPU
+# Help reduce memory fragmentation
+export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "--- Executing main script ---"
 
