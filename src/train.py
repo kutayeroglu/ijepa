@@ -401,6 +401,9 @@ def main(args, resume_preempt=False):
                 grad_stats = grad_logger(encoder.named_parameters())
                 optimizer.zero_grad()
 
+                # Clear cache after backward to free memory
+                torch.cuda.empty_cache()
+
                 # Step 3. momentum update of target encoder
                 with torch.no_grad():
                     m = next(momentum_scheduler)
@@ -409,11 +412,29 @@ def main(args, resume_preempt=False):
                     ):
                         param_k.data.mul_(m).add_((1.0 - m) * param_q.detach().data)
 
+                # Clear cache after momentum update
+                torch.cuda.empty_cache()
+
                 return (float(loss), _new_lr, _new_wd, grad_stats)
 
             (loss, _new_lr, _new_wd, grad_stats), etime = gpu_timer(train_step)
             loss_meter.update(loss)
             time_meter.update(etime)
+
+            # Log memory usage periodically
+            if (
+                torch.cuda.is_available()
+                and rank == 0
+                and (itr % log_freq == 0 or itr == 0)
+            ):
+                mem_used = torch.cuda.memory_reserved(0) / 1024**3
+                mem_allocated = torch.cuda.memory_allocated(0) / 1024**3
+                total_mem = torch.cuda.get_device_properties(0).total_memory / 1024**3
+                logger.info(
+                    f"[Memory] Reserved: {mem_used:.2f} GB, "
+                    f"Allocated: {mem_allocated:.2f} GB, "
+                    f"Usage: {mem_used / total_mem * 100:.1f}%"
+                )
 
             # -- Logging
             def log_stats():

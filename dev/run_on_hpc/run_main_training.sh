@@ -32,8 +32,8 @@ echo ""
 cd "$HOME/projects/ijepa"
 
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_GPU
-# Help reduce memory fragmentation
-export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+# Note: expandable_segments not supported on this platform
+# export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "--- Executing main script ---"
 
