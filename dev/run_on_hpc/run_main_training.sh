@@ -29,10 +29,20 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_GPU
 
 echo "--- Executing main script ---"
 
-python3 main.py \
-    --fname configs/HPC_in1k_vith14_ep300.yaml \
-    --devices cuda:0 \
-    ${EXTRA_ARGS}
+# Build command with optional extra args
+CMD_ARGS=(
+    --fname configs/HPC_in1k_vith14_ep300.yaml
+    --devices cuda:0
+)
+
+# Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)
+if [ -n "${EXTRA_ARGS:-}" ]; then
+    # Split EXTRA_ARGS by spaces and add to array
+    read -ra EXTRA_ARRAY <<< "${EXTRA_ARGS}"
+    CMD_ARGS+=("${EXTRA_ARRAY[@]}")
+fi
+
+python3 main.py "${CMD_ARGS[@]}"
 
 echo "--- Job Finished Successfully ---"
 
