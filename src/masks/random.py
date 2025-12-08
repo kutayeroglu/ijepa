@@ -19,7 +19,7 @@ class MaskCollator(object):
 
     def __init__(
         self,
-        ratio=(0.4, 0.6),
+        ratio=(0.4, 0.6), # A range: %40-%60 patches to mask 
         input_size=(224, 224),
         patch_size=16,
     ):
