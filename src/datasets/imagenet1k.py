@@ -33,7 +33,8 @@ def make_imagenet1k(
     training=True,
     copy_data=False,
     drop_last=True,
-    subset_file=None
+    subset_file=None,
+    train_fraction=None
 ):
     dataset = ImageNet(
         root=root_path,
@@ -44,6 +45,8 @@ def make_imagenet1k(
         index_targets=False)
     if subset_file is not None:
         dataset = ImageNetSubset(dataset, subset_file)
+    if train_fraction is not None and training:
+        dataset = ImageNetFraction(dataset, train_fraction)
     logger.info('ImageNet dataset created')
     dist_sampler = torch.utils.data.distributed.DistributedSampler(
         dataset=dataset,
@@ -172,6 +175,47 @@ class ImageNetSubset(object):
         if self.dataset.target_transform is not None:
             target = self.dataset.target_transform(target)
         return img, target
+
+
+class ImageNetFraction(object):
+
+    def __init__(self, dataset, fraction):
+        """
+        ImageNetFraction
+
+        Wrapper to use a fraction of the training dataset.
+
+        :param dataset: ImageNet dataset object
+        :param fraction: float between 0.0 and 1.0, fraction of dataset to use
+        """
+        if not (0.0 < fraction <= 1.0):
+            raise ValueError(f'train_fraction must be between 0.0 and 1.0, got {fraction}')
+        
+        self.dataset = dataset
+        self.fraction = fraction
+        
+        # Create reproducible random subset of indices
+        num_samples = len(dataset)
+        num_subset = int(num_samples * fraction)
+        
+        # Use fixed seed for reproducibility
+        generator = torch.Generator().manual_seed(_GLOBAL_SEED)
+        indices = torch.randperm(num_samples, generator=generator)[:num_subset].tolist()
+        self.indices = indices
+        
+        logger.info(f'Using {num_subset}/{num_samples} samples ({fraction*100:.1f}% of dataset)')
+
+    @property
+    def classes(self):
+        return self.dataset.classes
+
+    def __len__(self):
+        return len(self.indices)
+
+    def __getitem__(self, index):
+        # Map the subset index to the original dataset index
+        original_index = self.indices[index]
+        return self.dataset[original_index]
 
 
 def copy_imgnt_locally(

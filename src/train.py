@@ -89,6 +89,7 @@ def main(args, resume_preempt=False):
     image_folder = args["data"]["image_folder"]
     crop_size = args["data"]["crop_size"]
     crop_scale = args["data"]["crop_scale"]
+    train_fraction = args["data"].get("train_fraction", None)  # Optional fraction of training set
     # --
 
     # -- MASK
@@ -246,6 +247,7 @@ def main(args, resume_preempt=False):
         image_folder=image_folder,
         copy_data=copy_data,
         drop_last=True,
+        train_fraction=train_fraction,
     )
     ipe = len(unsupervised_loader)
 
