@@ -1,25 +1,25 @@
 # src/masks/multi_green.py
 import torch
 import math
+import numpy as np
 import torch.nn.functional as F
 from multiprocessing import Value
 from logging import getLogger
 
 logger = getLogger()
 
-class GreenMaskCollator(object):
+class MaskCollator(object):
     def __init__(
         self,
         input_size=(224, 224),
         patch_size=16,
         enc_mask_scale=(0.85, 1.0), # Context scale
         pred_mask_scale=(0.6, 0.8), # Target scale (Total area of targets)
-        sigma_1=0.5, # Green noise low freq sigma
-        sigma_2=2.0, # Green noise high freq sigma
+        data_path="/users/kutay.eroglu/datasets/green_noise_data_3072.npz",  # Path to green noise patterns
         min_keep=10,
         allow_overlap=False
     ):
-        # TODO: super(MaskCollator, self).__init__() ?? 
+        super(MaskCollator, self).__init__() 
         if not isinstance(input_size, tuple):
             input_size = (input_size, ) * 2
         self.patch_size = patch_size
@@ -29,11 +29,12 @@ class GreenMaskCollator(object):
         )  # total number of patches for x, y dimensions of the entire image
         self.enc_mask_scale = enc_mask_scale
         self.pred_mask_scale = pred_mask_scale
-        self.sigma_1 = sigma_1
-        self.sigma_2 = sigma_2
         self.min_keep = min_keep
         self.allow_overlap = allow_overlap
         self._itr_counter = Value('i', -1)
+        
+        # Load green noise patterns from file
+        self._load_green_noise_patterns(data_path)
 
     def step(self):
         i = self._itr_counter
@@ -42,46 +43,60 @@ class GreenMaskCollator(object):
             v = i.value
         return v
 
-    def _generate_green_noise(self, generator):
-        """
-        Generates a Green Noise map (Band-pass filtered noise)
-        Corresponds to Eq. 3 in ColorMAE paper: Ng = G_s1 * W - G_s2 * W
-        """
-        # 1. Generate White Noise (W)
-        noise = torch.randn(1, 1, self.height, self.width, generator=generator)
-
-        # 2. Define Gaussian Kernels
-        # Kernel size should be large enough to cover the sigma interaction (e.g., 4*sigma)
-        k_size = int(4 * self.sigma_2 + 1)
-        if k_size % 2 == 0: k_size += 1
+    def _load_green_noise_patterns(self, data_path):
+        """Load pre-generated green noise patterns from npz file."""
+        try:
+            image_tensor = np.load(data_path)
+            image_tensor = torch.from_numpy(image_tensor[image_tensor.files[0]])
+            print(f"=========> Loading Green Noise Patterns: {data_path} <=========")
+        except Exception as e:
+            raise Exception(f"Green Noise patterns not found at {data_path}. Error: {e}")
         
-        # Create 2D Gaussian kernels
-        # Note: In a production collator, these kernels should be cached to save CPU cycles
-        x_cord = torch.arange(k_size).float() - k_size // 2
-        x_grid = x_cord.repeat(k_size).view(k_size, k_size)
-        y_grid = x_grid.t()
-        xy_grid = torch.sqrt(x_grid**2 + y_grid**2)
+        self.green_noise_tensor = image_tensor  # Shape: [L, M, N]
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.green_noise_tensor = self.green_noise_tensor.to(self.device)
 
-        def get_kernel(sigma):
-            kernel = torch.exp(-((xy_grid)**2) / (2 * sigma**2))
-            kernel = kernel / torch.sum(kernel)
-            return kernel.view(1, 1, k_size, k_size)
-
-        k1 = get_kernel(self.sigma_1)
-        k2 = get_kernel(self.sigma_2)
-
-        # 3. Apply Filters (Band-pass)
-        # We use padding to maintain spatial dimensions
-        pad = k_size // 2
+    def _get_green_noise_window(self, generator):
+        """
+        Extract a [height, width] green noise pattern window from loaded patterns.
         
-        # Weak blur (High pass component)
-        blur1 = F.conv2d(noise, k1, padding=pad)
-        # Strong blur (Low pass component)
-        blur2 = F.conv2d(noise, k2, padding=pad)
-
-        # Green Noise = Weak Blur - Strong Blur
-        green_noise = blur1 - blur2
-        return green_noise.squeeze()
+        Args:
+            generator: Random generator for reproducibility
+        
+        Returns:
+            torch.Tensor: Green noise pattern of shape [height, width]
+        """
+        L, M, N = self.green_noise_tensor.shape  # [num_patterns, pattern_h, pattern_w]
+        
+        # Step 1: Randomly select one pattern from the L available patterns
+        pattern_idx = torch.randint(0, L, (1,), generator=generator).item()
+        pattern = self.green_noise_tensor[pattern_idx]  # Shape: [M, N]
+        
+        # Step 2: Extract a [height, width] window from the pattern
+        if M >= self.height and N >= self.width:
+            # Pattern is larger - randomly crop a window
+            top = torch.randint(0, M - self.height + 1, (1,), generator=generator).item()
+            left = torch.randint(0, N - self.width + 1, (1,), generator=generator).item()
+            window = pattern[top:top+self.height, left:left+self.width]
+        elif M == self.height and N == self.width:
+            # Pattern matches exactly - use it directly
+            window = pattern
+        else:
+            # Pattern is smaller - interpolate (shouldn't happen with proper patterns)
+            window = F.interpolate(
+                pattern.unsqueeze(0).unsqueeze(0),
+                size=(self.height, self.width),
+                mode='bilinear',
+                align_corners=False
+            ).squeeze()
+        
+        # Step 3: Optional random flips for additional variety
+        if torch.rand(1, generator=generator).item() < 0.5:
+            window = torch.flip(window, dims=[1])  # horizontal flip
+        if torch.rand(1, generator=generator).item() < 0.5:
+            window = torch.flip(window, dims=[0])  # vertical flip
+        
+        return window  # Shape: [height, width]
 
     def _threshold_mask(self, noise_map, scale_range, generator, acceptable_mask=None):
         """
@@ -126,86 +141,85 @@ class GreenMaskCollator(object):
         return keep_indices, binary_mask
 
     def __call__(self, batch):
+        """
+        Process a batch of images and generate green noise-based masks.
+        
+        For each image:
+        1. Extract a green noise pattern window (height x width)
+        2. Use it to select target patches (top X% by noise value)
+        3. Use it to select context patches (top Y% by noise value, avoiding targets if no overlap)
+        """
         B = len(batch)
         collated_batch = torch.utils.data.default_collate(batch)
 
+        # Use a seed for reproducibility
         seed = self.step()
         g = torch.Generator()
         g.manual_seed(seed)
 
-        collated_masks_pred = [] # Targets
-        collated_masks_enc = []  # Contexts
+        collated_masks_pred = []  # Target masks (what to predict)
+        collated_masks_enc = []    # Context masks (what encoder sees)
 
-        for _ in range(B):
-            # 1. Generate Green Noise Map for this image
-            # We use one map per image to ensure context/target come from same distribution logic
-            # Or generate two independent ones? 
-            # I-JEPA samples context and target independently. 
-            # ColorMAE uses one map. Let's generate independent noise maps for diversity.
+        for img_idx in range(B):
+            # ============================================================
+            # STEP 1: Get a green noise pattern for this image
+            # ============================================================
+            # Extract a [height, width] window from loaded patterns
+            # This gives us noise values at each patch position
+            green_noise = self._get_green_noise_window(g)  # Shape: [height, width]
             
-            # --- TARGET GENERATION ---
-            noise_pred = self._generate_green_noise(g)
-            
-            # Select Target Mask (Top X% of Green Noise)
-            # We pass None for acceptable_mask because Target is generated first
+            # ============================================================
+            # STEP 2: Create TARGET mask (what the model should predict)
+            # ============================================================
+            # Select top X% of patches (by noise value) as targets
+            # pred_mask_scale = (0.6, 0.8) means keep 60-80% of patches
             pred_indices, pred_binary = self._threshold_mask(
-                noise_pred, self.pred_mask_scale, g
+                green_noise,           # Use noise values to decide
+                self.pred_mask_scale,  # Keep 60-80% of patches
+                g,
+                acceptable_mask=None   # No restrictions for targets
             )
+            # pred_indices: which patch indices to keep (e.g., [5, 12, 23, ...])
+            # pred_binary: binary mask [height, width] where 1 = keep, 0 = mask
             
-            # I-JEPA expects a list of targets (usually 4 blocks). 
-            # In Green Noise, we generate one big "clutter" mask. 
-            # We wrap it in a list to match the return signature expected by train.py
-            masks_p = [pred_indices] 
+            masks_p = [pred_indices]  # Wrap in list (I-JEPA expects list of masks)
             
-            # --- CONTEXT GENERATION ---
-            noise_enc = self._generate_green_noise(g)
+            # ============================================================
+            # STEP 3: Create CONTEXT mask (what encoder sees)
+            # ============================================================
+            # Get a DIFFERENT green noise pattern for context (for diversity)
+            green_noise_enc = self._get_green_noise_window(g)  # Different pattern
             
-            # Define Exclusion Zone (Inverse of Target) if overlap not allowed
+            # If overlap not allowed, exclude target patches from context
             acceptable_mask = None
             if not self.allow_overlap:
-                # Acceptable = 1 where Pred is 0
-                acceptable_mask = 1 - pred_binary
+                # acceptable_mask = 1 where we CAN select, 0 where we CANNOT
+                # We cannot select patches that are already targets
+                acceptable_mask = 1 - pred_binary  # Inverse of target mask
             
-            # Select Context Mask
+            # Select top Y% of patches (by noise value) as context
+            # enc_mask_scale = (0.85, 1.0) means keep 85-100% of patches
             enc_indices, _ = self._threshold_mask(
-                noise_enc, self.enc_mask_scale, g, acceptable_mask=acceptable_mask
+                green_noise_enc,       # Use noise values to decide
+                self.enc_mask_scale,   # Keep 85-100% of patches
+                g,
+                acceptable_mask=acceptable_mask  # Respect overlap constraint
             )
-            masks_e = [enc_indices]
-
+            
+            masks_e = [enc_indices]  # Wrap in list
+            
             collated_masks_pred.append(masks_p)
             collated_masks_enc.append(masks_e)
 
-        # Collate (Pad to same length if necessary, though fixed scale usually results in fixed length)
-        # For simplicity using standard collation, assuming fixed sizes:
-        def collate_masks(mask_list):
-            # Flatten list of lists -> batch of tensors
-            # Structure: Batch -> Num_Masks -> Indices
-            # Input is B x N_masks x Num_Indices
-            # Output should be List[Tensor(B, Num_Indices)] of length N_masks
-            
-            # Since we only generate 1 complex mask per image for now:
-            out = []
-            num_masks = len(mask_list[0])
-            for i in range(num_masks):
-                batch_m = torch.stack([m[i] for m in mask_list])
-                out.append(batch_m)
-            return out[0] # Just return the tensor if it's a single block logic, 
-                          # BUT train.py expects a list if you use multiple blocks.
-                          # Adjust based on train.py loop.
-        
-        # Based on src/train.py:
-        # masks_enc is passed to encoder. encoder expects [B, N] or list?
-        # train.py line 205: z = encoder(imgs, masks_enc)
-        # src/models/vision_transformer.py line 248: if masks is not None: x = apply_masks(x, masks)
-        # src/masks/utils.py line 17: for m in masks: ...
-        # It expects a LIST of tensors.
-        
+        # ============================================================
+        # STEP 4: Collate masks for the batch
+        # ============================================================
+        # Convert from list of lists to batch tensors
         collated_masks_pred = torch.utils.data.default_collate(collated_masks_pred)
         collated_masks_enc = torch.utils.data.default_collate(collated_masks_enc)
         
-        # The collate above creates [B, 1, N_keep]. We need to convert to list of [B, N_keep]
-        # Because train.py handles list of masks.
-        
+        # Shape after collate: [B, 1, N_keep] where N_keep = number of kept patches
+        # train.py expects a LIST of tensors, each of shape [B, N_keep]
         final_masks_enc = [collated_masks_enc[:, i, :] for i in range(collated_masks_enc.shape[1])]
         final_masks_pred = [collated_masks_pred[:, i, :] for i in range(collated_masks_pred.shape[1])]
 

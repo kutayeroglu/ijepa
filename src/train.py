@@ -30,6 +30,7 @@ import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel
 
 from src.masks.multiblock import MaskCollator as MBMaskCollator
+from src.masks.multigreen import MaskCollator as GreenMaskCollator
 from src.masks.utils import apply_masks
 from src.utils.distributed import init_distributed, AllReduce
 from src.utils.logging import CSVLogger, gpu_timer, grad_logger, AverageMeter
@@ -103,6 +104,8 @@ def main(args, resume_preempt=False):
     num_pred_masks = args["mask"]["num_pred_masks"]  # number of target blocks
     pred_mask_scale = args["mask"]["pred_mask_scale"]  # scale of target blocks
     aspect_ratio = args["mask"]["aspect_ratio"]  # aspect ratio of target blocks
+    mask_type = args["mask"].get("mask_type", "multiblock")  # mask type: "multiblock" or "multigreen"
+    green_noise_data_path = args["mask"].get("green_noise_data_path", None)  # path to green noise patterns
     # --
 
     # -- OPTIMIZATION
@@ -212,17 +215,30 @@ def main(args, resume_preempt=False):
         )
 
     # -- make data transforms
-    mask_collator = MBMaskCollator(
-        input_size=crop_size,
-        patch_size=patch_size,
-        pred_mask_scale=pred_mask_scale,
-        enc_mask_scale=enc_mask_scale,
-        aspect_ratio=aspect_ratio,
-        nenc=num_enc_masks,
-        npred=num_pred_masks,
-        allow_overlap=allow_overlap,
-        min_keep=min_keep,
-    )
+    if mask_type == "multigreen":
+        if green_noise_data_path is None:
+            raise ValueError("green_noise_data_path must be specified when using multigreen mask type")
+        mask_collator = GreenMaskCollator(
+            input_size=crop_size,
+            patch_size=patch_size,
+            pred_mask_scale=pred_mask_scale,
+            enc_mask_scale=enc_mask_scale,
+            allow_overlap=allow_overlap,
+            min_keep=min_keep,
+            data_path=green_noise_data_path,
+        )
+    else:
+        mask_collator = MBMaskCollator(
+            input_size=crop_size,
+            patch_size=patch_size,
+            pred_mask_scale=pred_mask_scale,
+            enc_mask_scale=enc_mask_scale,
+            aspect_ratio=aspect_ratio,
+            nenc=num_enc_masks,
+            npred=num_pred_masks,
+            allow_overlap=allow_overlap,
+            min_keep=min_keep,
+        )
 
     transform = make_transforms(
         crop_size=crop_size,
