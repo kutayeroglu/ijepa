@@ -29,10 +29,10 @@ class ColorMasking:
 
         self.change_color_pattern(data_path)
 
-        self.W = W
+        self.W = W # NOTE: number of patches per dimension
         self.mask_ratio = mask_ratio
         self.trans_sequence = transforms.Compose([
-            transforms.RandomCrop(W),
+            transforms.RandomCrop(W), # NOTE: results in WxW window
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
             NormalizeBySliceMax()
@@ -41,7 +41,7 @@ class ColorMasking:
     def change_color_pattern(self, data_path):
         try:
             image_tensor = np.load(data_path)
-            image_tensor = torch.from_numpy(image_tensor[image_tensor.files[0]])
+            image_tensor = torch.from_numpy(image_tensor[image_tensor.files[0]]) 
             if "green" in data_path:
                 print(f"=========> Loading Green Noise Patterns: {data_path} <=========")
                 self.loaded_color = "green"
@@ -65,8 +65,27 @@ class ColorMasking:
         self.image_tensor = self.image_tensor.to(self.device)
 
     def extract_windows(self, B):
+        """
+        Extract W×W windows from color noise patterns for batch masking.
+        
+        Extracts B windows (one per batch element) by randomly cropping, flipping,
+        and normalizing the loaded color noise patterns. If B > L (number of patterns
+        in file), patterns are reused by calling the random transforms again.
+        
+        Args:
+            B (int): Batch size - number of windows to extract
+        
+        Returns:
+            torch.Tensor: Tensor of shape [B, W, W] where each window determines
+                which patches to mask for one image in the batch.
+        """
+        
+        # NOTE: image_tensor -> color noise pattern
+        ## L -> number of pattern slices 
+        ## M, N -> spatial dimensions of the pattern
+        
         # Define the random crop transform
-        L, M, N = self.image_tensor.shape
+        L, M, N = self.image_tensor.shape  
         windows = []
 
         # Number of full iterations
@@ -77,9 +96,9 @@ class ColorMasking:
         # Extract full L-sized windows
         for _ in range(full_iterations):
             # Apply random crop to get a WxW window
-            w_tensor = self.trans_sequence(self.image_tensor)
-            windows.append(w_tensor)
-
+            w_tensor = self.trans_sequence(self.image_tensor) # NOTE: [L, W, W]
+            # NOTE: windows => [B, W, W] : B = (full_iterations * L) + residual
+            windows.append(w_tensor) 
         # Extract residual elements if necessary
         if residual > 0:
             w_tensor = self.trans_sequence(self.image_tensor)[:residual]

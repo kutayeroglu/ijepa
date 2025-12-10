@@ -91,7 +91,8 @@ class ColorMAEViT(VisionTransformer):
         self.mask_type = mask_type
         if isinstance(self.mask_type, dict):
             print(f"=========> USING COLORED NOISE MASKING: {self.mask_ratio} Masking Ratio <=========")
-            self.masking_generator = ColorMasking(img_size // patch_size,
+            # NOTE: loads pre-generated color noise patterns stores in object 
+            self.masking_generator = ColorMasking(img_size // patch_size, 
                                                   mask_ratio=self.mask_ratio,
                                                   data_path=self.mask_type['begin']['data_path'])
         elif self.mask_type == "random":
@@ -219,7 +220,7 @@ class ColorMAEViT(VisionTransformer):
             return super().forward(x)
 
         else:
-            B = x.shape[0]
+            B = x.shape[0] # NOTE: batch size
             x = self.patch_embed(x)[0]
             # add pos embed w/o cls token
             x = x + self.pos_embed[:, 1:, :]
@@ -228,7 +229,7 @@ class ColorMAEViT(VisionTransformer):
                 # masking: length -> length * mask_ratio
                 x, mask, ids_restore = self.random_masking(x, self.mask_ratio)
             elif isinstance(self.mask_type, dict):
-                x, mask, ids_restore = self.color_masking(x)
+                x, mask, ids_restore = self.color_masking(x) # NOTE: masked image, mask and ids to restore original image
             else:
                 raise NotImplementedError("This type of masking is not implemented.")
 
