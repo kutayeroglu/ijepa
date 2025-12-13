@@ -59,12 +59,6 @@ class MaskCollator(object):
     def _get_green_noise_window(self, generator):
         """
         Extract a [height, width] green noise pattern window from loaded patterns.
-        
-        Args:
-            generator: Random generator for reproducibility
-        
-        Returns:
-            torch.Tensor: Green noise pattern of shape [height, width]
         """
         L, M, N = self.green_noise_tensor.shape  # [num_patterns, pattern_h, pattern_w]
         
@@ -111,18 +105,6 @@ class MaskCollator(object):
         
         num_keep = int(num_patches * target_scale)
         
-        # If we have an exclusion zone (acceptable_mask), we force those pixels to -inf
-        # so they are never selected
-        if acceptable_mask is not None:
-            # acceptable_mask is 1 where valid, 0 where invalid (overlap)
-            # We want to forbid selecting where acceptable_mask == 0
-            # noise_map[acceptable_mask == 0] = -float('inf')
-            
-            # NOTE: I-JEPA logic is slightly different: 
-            # It generates the mask, THEN removes overlap. 
-            # If we want strict I-JEPA adherence:
-            pass
-
         # Sort and pick top k
         flat_noise = noise_map.flatten()
         
@@ -143,11 +125,7 @@ class MaskCollator(object):
     def __call__(self, batch):
         """
         Process a batch of images and generate green noise-based masks.
-        
-        For each image:
-        1. Extract a green noise pattern window (height x width)
-        2. Use it to select target patches (top X% by noise value)
-        3. Use it to select context patches (top Y% by noise value, avoiding targets if no overlap)
+        Ensures consistent tensor sizes for collation by truncating to minimum length.
         """
         B = len(batch)
         collated_batch = torch.utils.data.default_collate(batch)
@@ -158,52 +136,40 @@ class MaskCollator(object):
         g.manual_seed(seed)
 
         collated_masks_pred = []  # Target masks (what to predict)
-        collated_masks_enc = []    # Context masks (what encoder sees)
+        collated_masks_enc = []   # Context masks (what encoder sees)
 
         for img_idx in range(B):
             # ============================================================
             # STEP 1: Get a green noise pattern for this image
             # ============================================================
-            # Extract a [height, width] window from loaded patterns
-            # This gives us noise values at each patch position
-            green_noise = self._get_green_noise_window(g)  # Shape: [height, width]
+            green_noise = self._get_green_noise_window(g) 
             
             # ============================================================
-            # STEP 2: Create TARGET mask (what the model should predict)
+            # STEP 2: Create TARGET mask
             # ============================================================
-            # Select top X% of patches (by noise value) as targets
-            # pred_mask_scale = (0.6, 0.8) means keep 60-80% of patches
             pred_indices, pred_binary = self._threshold_mask(
-                green_noise,           # Use noise values to decide
-                self.pred_mask_scale,  # Keep 60-80% of patches
+                green_noise,            
+                self.pred_mask_scale,   
                 g,
-                acceptable_mask=None   # No restrictions for targets
+                acceptable_mask=None    
             )
-            # pred_indices: which patch indices to keep (e.g., [5, 12, 23, ...])
-            # pred_binary: binary mask [height, width] where 1 = keep, 0 = mask
             
-            masks_p = [pred_indices]  # Wrap in list (I-JEPA expects list of masks)
+            masks_p = [pred_indices]  # Wrap in list
             
             # ============================================================
-            # STEP 3: Create CONTEXT mask (what encoder sees)
+            # STEP 3: Create CONTEXT mask
             # ============================================================
-            # Get a DIFFERENT green noise pattern for context (for diversity)
-            green_noise_enc = self._get_green_noise_window(g)  # Different pattern
+            green_noise_enc = self._get_green_noise_window(g) 
             
-            # If overlap not allowed, exclude target patches from context
             acceptable_mask = None
             if not self.allow_overlap:
-                # acceptable_mask = 1 where we CAN select, 0 where we CANNOT
-                # We cannot select patches that are already targets
-                acceptable_mask = 1 - pred_binary  # Inverse of target mask
+                acceptable_mask = 1 - pred_binary 
             
-            # Select top Y% of patches (by noise value) as context
-            # enc_mask_scale = (0.85, 1.0) means keep 85-100% of patches
             enc_indices, _ = self._threshold_mask(
-                green_noise_enc,       # Use noise values to decide
-                self.enc_mask_scale,   # Keep 85-100% of patches
+                green_noise_enc,       
+                self.enc_mask_scale,   
                 g,
-                acceptable_mask=acceptable_mask  # Respect overlap constraint
+                acceptable_mask=acceptable_mask 
             )
             
             masks_e = [enc_indices]  # Wrap in list
@@ -212,14 +178,26 @@ class MaskCollator(object):
             collated_masks_enc.append(masks_e)
 
         # ============================================================
-        # STEP 4: Collate masks for the batch
+        # STEP 4: Synchronize Lengths (The Fix)
         # ============================================================
-        # Convert from list of lists to batch tensors
+        # Calculate the minimum length found in this batch for both sets of masks
+        # collated_masks_pred is a list of lists of tensors: [[tensor(140)], [tensor(145)], ...]
+        min_keep_pred = min([len(m[0]) for m in collated_masks_pred])
+        min_keep_enc = min([len(m[0]) for m in collated_masks_enc])
+        
+        # Truncate all masks to the minimum length
+        # We slice indices[:min_keep] to ensure they are all the same size
+        collated_masks_pred = [[m[0][:min_keep_pred]] for m in collated_masks_pred]
+        collated_masks_enc = [[m[0][:min_keep_enc]] for m in collated_masks_enc]
+
+        # ============================================================
+        # STEP 5: Collate
+        # ============================================================
         collated_masks_pred = torch.utils.data.default_collate(collated_masks_pred)
         collated_masks_enc = torch.utils.data.default_collate(collated_masks_enc)
         
-        # Shape after collate: [B, 1, N_keep] where N_keep = number of kept patches
-        # train.py expects a LIST of tensors, each of shape [B, N_keep]
+        # Shape after collate: [B, 1, N_keep]
+        # Flatten the list dimension to match I-JEPA training loop expectations
         final_masks_enc = [collated_masks_enc[:, i, :] for i in range(collated_masks_enc.shape[1])]
         final_masks_pred = [collated_masks_pred[:, i, :] for i in range(collated_masks_pred.shape[1])]
 
