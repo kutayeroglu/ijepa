@@ -22,8 +22,8 @@ class MaskCollator(object):
         self,
         input_size=(224, 224),
         patch_size=16,
-        enc_mask_scale=(0.2, 0.8),
-        pred_mask_scale=(0.2, 0.8),
+        enc_mask_scale=(0.2, 0.8), # total fraction of patches to mask
+        pred_mask_scale=(0.2, 0.8), # total fraction of patches to mask
         aspect_ratio=(0.3, 3.0),
         nenc=1,
         npred=2,
@@ -80,11 +80,22 @@ class MaskCollator(object):
         h, w = b_size  # block height and width (expressed in number of patches)
 
         def constrain_mask(mask, tries=0):
-            """Helper to restrict given mask to a set of acceptable regions"""
+            """
+            Helper to restrict given mask to a set of acceptable regions.
+            
+            Args:
+                mask: 2D binary mask (1 = in block, 0 = not in block)
+                tries: Number of constraint relaxations (0 = enforce all, 1 = ignore one, etc.)
+            
+            Process:
+                - acceptable_regions is a list of 2D binary masks (1 = acceptable, 0 = not acceptable)
+                - Element-wise multiplication: mask *= region zeros out pixels where region=0
+                - This "crops" the block to only overlap with acceptable regions
+                - As tries increases, fewer regions are enforced (gradual constraint relaxation)
+            """            
             N = max(int(len(acceptable_regions) - tries), 0)
             for k in range(N):
-                mask *= acceptable_regions[k]
-
+                mask *= acceptable_regions[k]  # Element-wise: 1*1=1 (keep), 1*0=0 (remove)
         # --
         # -- Loop to sample masks until we find a valid one
         tries = 0
@@ -99,7 +110,7 @@ class MaskCollator(object):
             # -- Constrain mask to a set of acceptable regions
             if acceptable_regions is not None:
                 constrain_mask(mask, tries)
-            mask = torch.nonzero(mask.flatten())
+            mask = torch.nonzero(mask.flatten()) # Converts 2D binary mask to indices
             # -- If mask too small try again
             valid_mask = len(mask) > self.min_keep
             if not valid_mask:
@@ -112,6 +123,12 @@ class MaskCollator(object):
                     )
         mask = mask.squeeze()
         # --
+        # Create complement mask (2D, not flattened)
+        # mask_complement stays 2D because it's used for spatial constraints:
+        # - It becomes part of acceptable_regions
+        # - Used in element-wise multiplication with 2D masks in constrain_mask
+        # - The spatial structure (height × width) is needed for constraint logic
+        # NOTE: mask is 1D indices (for indexing), but mask_complement is 2D (for spatial ops)
         mask_complement = torch.ones((self.height, self.width), dtype=torch.int32)
         mask_complement[top : top + h, left : left + w] = 0
         # --
@@ -133,27 +150,27 @@ class MaskCollator(object):
         seed = self.step()
         g = torch.Generator()
         g.manual_seed(seed)
-        p_size = self._sample_block_size(  # block size for target block
+        p_size = self._sample_block_size(  # block size for target block [h,w (in number of patches)]
             generator=g,
             scale=self.pred_mask_scale,
             aspect_ratio_scale=self.aspect_ratio,
         )
-        e_size = self._sample_block_size(  # block size for context block
+        e_size = self._sample_block_size(  # block size for context block [h,w (in number of patches)]
             generator=g,
             scale=self.enc_mask_scale,
             aspect_ratio_scale=(1.0, 1.0),
         )
 
         collated_masks_pred, collated_masks_enc = [], []
-        min_keep_pred = self.height * self.width
-        min_keep_enc = self.height * self.width
+        min_keep_pred = self.height * self.width # maximum num of patches -> safe upper bound
+        min_keep_enc = self.height * self.width # maximum num of patches -> safe upper bound
         for _ in range(B):
             masks_p, masks_C = [], []
             for _ in range(self.npred):
                 mask, mask_C = self._sample_block_mask(p_size)
                 masks_p.append(mask)  # target block mask
                 masks_C.append(mask_C)  # target block complement mask
-                min_keep_pred = min(min_keep_pred, len(mask))
+                min_keep_pred = min(min_keep_pred, len(mask)) # update minimum number of patches to keep for target block
             collated_masks_pred.append(masks_p)
 
             acceptable_regions = masks_C
@@ -169,9 +186,10 @@ class MaskCollator(object):
                     e_size, acceptable_regions=acceptable_regions
                 )
                 masks_e.append(mask)
-                min_keep_enc = min(min_keep_enc, len(mask))
+                min_keep_enc = min(min_keep_enc, len(mask)) # update minimum number of patches to keep for context block
             collated_masks_enc.append(masks_e)
 
+        # ensure all masks are the same size (truncate to minimum)
         collated_masks_pred = [
             [cm[:min_keep_pred] for cm in cm_list] for cm_list in collated_masks_pred
         ]
