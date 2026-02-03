@@ -8,13 +8,13 @@ data:
   image_folder: ""
   num_workers: 4
   pin_mem: true
-  root_path: /mnt/data/imagenet
+  root_path: /datasets/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC
   use_color_distortion: false
   use_gaussian_blur: false
   use_horizontal_flip: false  
   train_fraction: 0.001
 logging:
-  folder: /mnt/logs/ijepa/pretraining
+  folder: /users/kutay.eroglu/logs/ijepa/pretraining
   write_tag: jepa
 mask:
   allow_overlap: false
