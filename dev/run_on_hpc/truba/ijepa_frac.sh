@@ -43,8 +43,9 @@ mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
 BIND_ARGS="$REAL_DATA_PATH:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
 
 # Debug: Check host directory
-echo "Debug: HOST REAL_LOG_PATH=$REAL_LOG_PATH"
-ls -ld "$REAL_LOG_PATH/ijepa/pretraining"
+echo "Debug: HOST REAL_LOG_PATH=$REAL_LOG_PATH" >&2
+ls -ld "$REAL_LOG_PATH/ijepa/pretraining" >&2
+chmod 755 "$REAL_LOG_PATH/ijepa/pretraining"
 
 # Define args
 CMD_ARGS=(
@@ -57,13 +58,14 @@ if [ -n "${EXTRA_ARGS:-}" ]; then
     CMD_ARGS+=("${EXTRA_ARRAY[@]}")
 fi
 
-echo "--- Executing main script with explicit bind ---"
+echo "--- Executing main script with explicit bind ---" >&2
 # Execute script with explicit bind to ensure it works
 SIF_IMAGE="$HOME/ijepa.sif"
 
 # Debug: Check container view
-apptainer exec --bind "$BIND_ARGS" "$SIF_IMAGE" ls -R /mnt/logs
+echo "Debug: Container /mnt/logs Listing:" >&2
+apptainer exec --bind "$BIND_ARGS" "$SIF_IMAGE" ls -R /mnt/logs >&2
 
 # Run Python
 apptainer exec --nv --bind "$BIND_ARGS" "$SIF_IMAGE" python3 main.py "${CMD_ARGS[@]}"
-echo "--- Job Finished Successfully ---"
+echo "--- Job Finished Successfully ---" >&2
