@@ -39,10 +39,14 @@ REAL_LOG_PATH="$SCRATCH_DIR/logs"
 # Ensure log directory exists on host
 mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
 
-export APPTAINER_BIND="$REAL_DATA_PATH:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
+# Put binds in a variable
+BIND_ARGS="$REAL_DATA_PATH:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
 
-# Execute script
-echo "--- Executing main script ---"
+# Debug: Check host directory
+echo "Debug: HOST REAL_LOG_PATH=$REAL_LOG_PATH"
+ls -ld "$REAL_LOG_PATH/ijepa/pretraining"
+
+# Define args
 CMD_ARGS=(
     --fname configs/train_frac.yaml
     --devices cuda:0
@@ -53,6 +57,13 @@ if [ -n "${EXTRA_ARGS:-}" ]; then
     CMD_ARGS+=("${EXTRA_ARRAY[@]}")
 fi
 
+echo "--- Executing main script with explicit bind ---"
+# Execute script with explicit bind to ensure it works
 SIF_IMAGE="$HOME/ijepa.sif"
-apptainer exec --nv "$SIF_IMAGE" python3 main.py "${CMD_ARGS[@]}"
+
+# Debug: Check container view
+apptainer exec --bind "$BIND_ARGS" "$SIF_IMAGE" ls -R /mnt/logs
+
+# Run Python
+apptainer exec --nv --bind "$BIND_ARGS" "$SIF_IMAGE" python3 main.py "${CMD_ARGS[@]}"
 echo "--- Job Finished Successfully ---"
