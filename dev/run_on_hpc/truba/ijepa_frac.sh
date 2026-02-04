@@ -37,7 +37,7 @@ REAL_DATA_PATH="/arf/repo/ImageNet"
 REAL_LOG_PATH="$SCRATCH_DIR/logs"
 
 # Ensure log directory exists on host
-mkdir -p "$REAL_LOG_PATH"
+mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
 
 export APPTAINER_BIND="$REAL_DATA_PATH:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
 
