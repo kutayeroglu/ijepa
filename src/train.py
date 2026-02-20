@@ -124,6 +124,7 @@ def main(args, resume_preempt=False):
     tag = args["logging"]["write_tag"]
 
     dump = os.path.join(folder, "params-ijepa.yaml")
+    os.makedirs(folder, exist_ok=True)
     with open(dump, "w") as f:
         yaml.dump(args, f)
     # ----------------------------------------------------------------------- #
