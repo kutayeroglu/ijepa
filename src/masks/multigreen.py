@@ -78,8 +78,7 @@ class MaskCollator(object):
             raise Exception(f"Green Noise patterns not found at {data_path}. Error: {e}")
         
         self.green_noise_tensor = image_tensor  # NOTE: Shape: [L, M, N], see _get_green_noise_window
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.green_noise_tensor = self.green_noise_tensor.to(self.device).float()
+        self.green_noise_tensor = self.green_noise_tensor.float()
     
     def step(self):
         i = self._itr_counter
