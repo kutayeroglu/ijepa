@@ -5,7 +5,7 @@
 #SBATCH --error=logs/train_frac_ijepa_train-%j.err
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
-#SBATCH --container-mounts /stratch/dataset:/datasets
+#SBATCH --container-mounts /datasets/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
