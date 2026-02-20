@@ -53,4 +53,3 @@ fi
 python3 main.py "${CMD_ARGS[@]}"
 
 echo "--- Job Finished Successfully ---"
-
