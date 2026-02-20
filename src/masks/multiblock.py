@@ -94,7 +94,12 @@ class MaskCollator(object):
         # e.g., if p_size = (8, 12), the block is 8 patches tall and 12 patches wide
         return (h, w)
 
-    def _sample_block_mask(self, b_size, acceptable_regions=None, log_detail=False):
+    def _sample_block_mask(
+        self, 
+        b_size: tuple[int, int], 
+        acceptable_regions: list[torch.Tensor] | None = None, 
+        log_detail: bool = False
+    ) -> tuple[torch.Tensor, torch.Tensor]:
         h, w = b_size  # block height and width (expressed in number of patches)
 
         def constrain_mask(mask, tries=0):
@@ -206,7 +211,7 @@ class MaskCollator(object):
                 mask, mask_C = self._sample_block_mask(p_size, log_detail=log_detail)
                 masks_p.append(mask)  # target block mask
                 masks_C.append(mask_C)  # target block complement mask
-                min_keep_pred = min(min_keep_pred, len(mask)) # update minimum number of patches to keep for target block
+                min_keep_pred = min(min_keep_pred, len(mask)) # track min size so all target masks can be truncated to the same length for batch collation
             collated_masks_pred.append(masks_p)
 
             acceptable_regions = masks_C
@@ -222,13 +227,30 @@ class MaskCollator(object):
                     e_size, acceptable_regions=acceptable_regions, log_detail=log_detail
                 )
                 masks_e.append(mask)
-                min_keep_enc = min(min_keep_enc, len(mask)) # update minimum number of patches to keep for context block
+                min_keep_enc = min(min_keep_enc, len(mask)) # track min size so all context masks can be truncated to the same length for batch collation
             collated_masks_enc.append(masks_e)
 
+        # =========================================================================
+        # Data Structure Explanation:
+        # Before truncation, `collated_masks_pred` and `collated_masks_enc` are 
+        # a list of lists of 1D torch.Tensors:
+        #   - Outer list: Length B (batch size)
+        #   - Inner list: Length npred/nenc (number of mask blocks per image)
+        #   - Innermost item: 1D torch.Tensor of patch indices
+        # 
+        # We must truncate all 1D tensors to the exact same minimum length 
+        # (`min_keep_pred` / `min_keep_enc`) so that PyTorch can stack them.
+        # =========================================================================
+        
         # ensure all masks are the same size (truncate to minimum)
         collated_masks_pred = [
             [cm[:min_keep_pred] for cm in cm_list] for cm_list in collated_masks_pred
         ]
+        
+        # After default_collate, it "zips" the batch items together.
+        # It becomes a list of 2D torch.Tensors:
+        #   - List length: npred/nenc (number of mask blocks)
+        #   - Tensor shape: [B, min_keep_pred] (each block batched across images)
         collated_masks_pred = torch.utils.data.default_collate(collated_masks_pred)
         # --
         collated_masks_enc = [
