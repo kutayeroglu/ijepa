@@ -238,6 +238,7 @@ def main(args, resume_preempt=False):
             npred=num_pred_masks,
             allow_overlap=allow_overlap,
             min_keep=min_keep,
+            debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
         )
 
     transform = make_transforms(

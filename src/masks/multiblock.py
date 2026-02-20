@@ -29,6 +29,7 @@ class MaskCollator(object):
         npred=2,
         min_keep=4,
         allow_overlap=False,
+        debug_log=False,
     ):
         super(MaskCollator, self).__init__()
         if not isinstance(input_size, tuple):
@@ -47,7 +48,18 @@ class MaskCollator(object):
         self.allow_overlap = (
             allow_overlap  # whether to allow overlap b/w enc and pred masks
         )
+        self.debug_log = debug_log
+        self._debug_logged_batches = 0  # only log full detail for first batch(s)
         self._itr_counter = Value("i", -1)  # collator is shared across worker processes
+        if self.debug_log:
+            logger.info(
+                "[multiblock] __init__: input_size=%s patch_size=%s height=%s width=%s "
+                "enc_mask_scale=%s pred_mask_scale=%s aspect_ratio=%s nenc=%s npred=%s "
+                "min_keep=%s allow_overlap=%s",
+                input_size, patch_size, self.height, self.width,
+                enc_mask_scale, pred_mask_scale, aspect_ratio, nenc, npred,
+                min_keep, allow_overlap,
+            )
 
     def step(self):
         i = self._itr_counter
@@ -56,7 +68,7 @@ class MaskCollator(object):
             v = i.value
         return v
 
-    def _sample_block_size(self, generator, scale, aspect_ratio_scale):
+    def _sample_block_size(self, generator, scale, aspect_ratio_scale, label=None, log_detail=False):
         _rand = torch.rand(1, generator=generator).item()
         # -- Sample block scale
         min_s, max_s = scale
@@ -73,10 +85,16 @@ class MaskCollator(object):
         while w >= self.width:
             w -= 1
 
+        if log_detail and label is not None:
+            logger.info(
+                "[multiblock] _sample_block_size(%s): scale=%s mask_scale=%s max_keep=%s "
+                "aspect_ratio_scale=%s aspect_ratio=%s (h,w)=(%s,%s)",
+                label, scale, mask_scale, max_keep, aspect_ratio_scale, aspect_ratio, h, w,
+            )
         # e.g., if p_size = (8, 12), the block is 8 patches tall and 12 patches wide
         return (h, w)
 
-    def _sample_block_mask(self, b_size, acceptable_regions=None):
+    def _sample_block_mask(self, b_size, acceptable_regions=None, log_detail=False):
         h, w = b_size  # block height and width (expressed in number of patches)
 
         def constrain_mask(mask, tries=0):
@@ -132,6 +150,13 @@ class MaskCollator(object):
         mask_complement = torch.ones((self.height, self.width), dtype=torch.int32)
         mask_complement[top : top + h, left : left + w] = 0
         # --
+        if log_detail:
+            top_val = top.item() if top.dim() > 0 else int(top)
+            left_val = left.item() if left.dim() > 0 else int(left)
+            logger.info(
+                "[multiblock] _sample_block_mask: b_size=%s top=%s left=%s len(mask)=%s tries=%s",
+                b_size, top_val, left_val, len(mask), tries,
+            )
         return mask, mask_complement
 
     def __call__(self, batch):
@@ -144,6 +169,9 @@ class MaskCollator(object):
         # 5. return enc mask and pred mask
         """
         B = len(batch)
+        log_detail = self.debug_log and (getattr(self, "_debug_logged_batches", 0) == 0)
+        if self.debug_log:
+            logger.info("[multiblock] __call__: B=%s", B)
 
         collated_batch = torch.utils.data.default_collate(batch)
 
@@ -154,12 +182,20 @@ class MaskCollator(object):
             generator=g,
             scale=self.pred_mask_scale,
             aspect_ratio_scale=self.aspect_ratio,
+            label="pred",
+            log_detail=log_detail,
         )
+        if self.debug_log:
+            logger.info("[multiblock] __call__: p_size=%s", p_size)
         e_size = self._sample_block_size(  # block size for context block [h,w (in number of patches)]
             generator=g,
             scale=self.enc_mask_scale,
             aspect_ratio_scale=(1.0, 1.0),
+            label="enc",
+            log_detail=log_detail,
         )
+        if self.debug_log:
+            logger.info("[multiblock] __call__: e_size=%s", e_size)
 
         collated_masks_pred, collated_masks_enc = [], []
         min_keep_pred = self.height * self.width # maximum num of patches -> safe upper bound
@@ -167,7 +203,7 @@ class MaskCollator(object):
         for _ in range(B):
             masks_p, masks_C = [], []
             for _ in range(self.npred):
-                mask, mask_C = self._sample_block_mask(p_size)
+                mask, mask_C = self._sample_block_mask(p_size, log_detail=log_detail)
                 masks_p.append(mask)  # target block mask
                 masks_C.append(mask_C)  # target block complement mask
                 min_keep_pred = min(min_keep_pred, len(mask)) # update minimum number of patches to keep for target block
@@ -183,7 +219,7 @@ class MaskCollator(object):
             masks_e = []
             for _ in range(self.nenc):
                 mask, _ = self._sample_block_mask(
-                    e_size, acceptable_regions=acceptable_regions
+                    e_size, acceptable_regions=acceptable_regions, log_detail=log_detail
                 )
                 masks_e.append(mask)
                 min_keep_enc = min(min_keep_enc, len(mask)) # update minimum number of patches to keep for context block
@@ -199,5 +235,27 @@ class MaskCollator(object):
             [cm[:min_keep_enc] for cm in cm_list] for cm_list in collated_masks_enc
         ]
         collated_masks_enc = torch.utils.data.default_collate(collated_masks_enc)
+
+        if self.debug_log:
+            logger.info(
+                "[multiblock] __call__: min_keep_pred=%s min_keep_enc=%s",
+                min_keep_pred, min_keep_enc,
+            )
+        if log_detail:
+            _k = 20
+            logger.info(
+                "[multiblock] collated_masks_pred shape=%s sample [0,0,:%s]=%s",
+                tuple(collated_masks_pred.shape),
+                _k,
+                collated_masks_pred[0, 0, :_k].tolist(),
+            )
+            logger.info(
+                "[multiblock] collated_masks_enc shape=%s sample [0,0,:%s]=%s",
+                tuple(collated_masks_enc.shape),
+                _k,
+                collated_masks_enc[0, 0, :_k].tolist(),
+            )
+        if self.debug_log:
+            self._debug_logged_batches += 1
 
         return collated_batch, collated_masks_enc, collated_masks_pred
