@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=train_frac_green_ijepa 
-#SBATCH --output=logs/train_frac_green_ijepa_train-%j.out
-#SBATCH --error=logs/train_frac_green_ijepa_train-%j.err
+#SBATCH --job-name=debug_frac_green_ijepa 
+#SBATCH --output=logs/debug_frac_green_ijepa-%j.out
+#SBATCH --error=logs/debug_frac_green_ijepa-%j.err
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
-#SBATCH --container-mounts /stratch/dataset:/datasets
+#SBATCH --container-mounts /stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet,/users/kutay.eroglu/datasets/green_noise_data_3072.npz:/mnt/green_noise_data_3072.npz
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
