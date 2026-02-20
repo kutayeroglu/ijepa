@@ -41,6 +41,7 @@ echo "--- Executing main script ---"
 CMD_ARGS=(
     --fname configs/train_frac_green.yaml
     --devices cuda:0
+    --batch_size 64
 )
 
 # Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)

@@ -42,6 +42,7 @@ export LOG_MULTIBLOCK_DEBUG=1
 CMD_ARGS=(
     --fname configs/train_frac.yaml
     --devices cuda:0
+    --batch_size 64
 )
 
 # Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)
