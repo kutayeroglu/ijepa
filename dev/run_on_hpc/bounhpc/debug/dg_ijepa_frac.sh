@@ -36,7 +36,7 @@ export OMP_NUM_THREADS=$SLURM_CPUS_PER_GPU
 # export PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
 echo "--- Executing main script ---"
-export LOG_MULTIBLOCK_DEBUG=1
+export LOG_MULTIBLOCK_DEBUG=0
 
 # Build command with optional extra args
 CMD_ARGS=(
