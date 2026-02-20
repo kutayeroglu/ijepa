@@ -244,16 +244,18 @@ class MaskCollator(object):
         if log_detail:
             _k = 20
             logger.info(
-                "[multiblock] collated_masks_pred shape=%s sample [0,0,:%s]=%s",
-                tuple(collated_masks_pred.shape),
+                "[multiblock] collated_masks_pred length=%s shape[0]=%s sample [0][0,:%s]=%s",
+                len(collated_masks_pred),
+                tuple(collated_masks_pred[0].shape),
                 _k,
-                collated_masks_pred[0, 0, :_k].tolist(),
+                collated_masks_pred[0][0, :_k].tolist(),
             )
             logger.info(
-                "[multiblock] collated_masks_enc shape=%s sample [0,0,:%s]=%s",
-                tuple(collated_masks_enc.shape),
+                "[multiblock] collated_masks_enc length=%s shape[0]=%s sample [0][0,:%s]=%s",
+                len(collated_masks_enc),
+                tuple(collated_masks_enc[0].shape),
                 _k,
-                collated_masks_enc[0, 0, :_k].tolist(),
+                collated_masks_enc[0][0, :_k].tolist(),
             )
         if self.debug_log:
             self._debug_logged_batches += 1
