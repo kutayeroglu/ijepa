@@ -5,7 +5,7 @@
 #SBATCH --error=logs/dg_fr_mnoise-%j.err
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
-#SBATCH --container-mounts /stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet,/users/kutay.eroglu/logs/ijepa/pretraining:/mnt/logs/ijepa
+#SBATCH --container-mounts /stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet,/users/kutay.eroglu/logs/ijepa/pretraining:/mnt/logs/ijepa,/users/kutay.eroglu/datasets/green_noise_data_3072.npz:/mnt/green_noise_data_3072.npz
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
