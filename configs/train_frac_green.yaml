@@ -29,7 +29,7 @@ mask:
   min_keep: 10
   num_enc_masks: 1
   num_pred_masks: 4
-  patch_size: 16
+  patch_size: 14
   pred_mask_scale:
   - 0.15
   - 0.2
