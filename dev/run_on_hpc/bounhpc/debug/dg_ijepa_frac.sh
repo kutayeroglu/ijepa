@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=train_frac_ijepa 
-#SBATCH --output=logs/train_frac_ijepa_train-%j.out
-#SBATCH --error=logs/train_frac_ijepa_train-%j.err
+#SBATCH --job-name=dg_frac_mblock 
+#SBATCH --output=logs/dg_frac_mblock-%j.out
+#SBATCH --error=logs/dg_frac_mblock-%j.err
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
-#SBATCH --container-mounts /stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet
+#SBATCH --container-mounts /stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet,/users/kutay.eroglu/logs/ijepa/pretraining:/mnt/logs/ijepa
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
@@ -42,7 +42,6 @@ export LOG_MULTIBLOCK_DEBUG=0
 CMD_ARGS=(
     --fname configs/train_frac.yaml
     --devices cuda:0
-    --batch_size 64
 )
 
 # Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)
