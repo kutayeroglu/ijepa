@@ -12,10 +12,10 @@ data:
   use_color_distortion: false
   use_gaussian_blur: false
   use_horizontal_flip: false
-  train_fraction: 0.001
+  train_fraction: 0.02
 logging:
   folder: /mnt/logs/ijepa/pretraining
-  write_tag: jepa_green
+  write_tag: multnoise
 mask:
   allow_overlap: false
   aspect_ratio:
@@ -45,11 +45,11 @@ optimization:
   ema:
   - 0.996
   - 1.0
-  epochs: 300
-  final_lr: 1.0e-06
+  epochs: 30
+  final_lr: 7.8e-09
   final_weight_decay: 0.4
   ipe_scale: 1.0
-  lr: 0.001
-  start_lr: 0.0002
-  warmup: 40
+  lr: 7.8e-07
+  start_lr: 7.8e-06
+  warmup: 6
   weight_decay: 0.04

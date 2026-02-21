@@ -1,11 +1,11 @@
 #!/bin/bash
 
-#SBATCH --job-name=debug_frac_green_ijepa 
-#SBATCH --output=logs/debug_frac_green_ijepa-%j.out
-#SBATCH --error=logs/debug_frac_green_ijepa-%j.err
+#SBATCH --job-name=dg_fr_mnoise 
+#SBATCH --output=logs/dg_fr_mnoise-%j.out
+#SBATCH --error=logs/dg_fr_mnoise-%j.err
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
-#SBATCH --container-mounts /stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet,/users/kutay.eroglu/datasets/green_noise_data_3072.npz:/mnt/green_noise_data_3072.npz
+#SBATCH --container-mounts /stratch/dataset/imagenet-object-localization-challenge/ILSVRC/Data/CLS-LOC:/mnt/data/imagenet,/users/kutay.eroglu/logs/ijepa/pretraining:/mnt/logs/ijepa
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
@@ -41,7 +41,6 @@ echo "--- Executing main script ---"
 CMD_ARGS=(
     --fname configs/train_frac_green.yaml
     --devices cuda:0
-    --batch_size 64
 )
 
 # Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)
