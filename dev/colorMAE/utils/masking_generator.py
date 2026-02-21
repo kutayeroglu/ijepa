@@ -76,8 +76,9 @@ class ColorMasking:
             B (int): Batch size - number of windows to extract
         
         Returns:
-            torch.Tensor: Tensor of shape [B, W, W] where each window determines
-                which patches to mask for one image in the batch.
+            torch.Tensor: Tensor of shape [B, W, W] containing continuous float values. 
+                These are the normalized color noise patterns that will be passed to 
+                `color_noise_mask` to determine exactly which patches to mask.
         """
         
         # NOTE: image_tensor -> color noise pattern
@@ -109,24 +110,49 @@ class ColorMasking:
         return torch.concatenate(windows, dim=0)
 
     def color_noise_mask(self, window):
+        """
+        Convert continuous color noise patterns into binary masks and patch indices.
+        
+        This method ensures exactly `self.mask_ratio` of patches are masked for 
+        every image in the batch by taking the patches corresponding to the highest 
+        noise values as the "kept" (unmasked) patches.
+
+        Args:
+            window (torch.Tensor): Continuous noise patterns of shape [N, W, W].
+                Usually the output of `extract_windows`.
+
+        Returns:
+            mask (torch.Tensor): Binary mask tensor of shape [N, L] where 0 indicates
+                a patch is kept/visible, and 1 indicates it is removed/masked.
+            ids_restore (torch.Tensor): Indices of shape [N, L] used to un-shuffle 
+                the kept patches and MASK tokens back into their original spatial order.
+            ids_keep (torch.Tensor): Indices of shape [N, len_keep] representing 
+                the patches to keep (feed into the encoder).
+        """
         N, W, W = window.shape
         L = W * W
         len_keep = int((L) * (1 - self.mask_ratio))
+        
+        # Flatten spatial dimensions
         window = window.view(N, -1)
-        ids_shuffle = torch.argsort(window, dim=1, descending=True)  # keep stronger values from color noise pattern
+        
+        # Sort noise values descending to predictably keep exactly `len_keep` patches.
+        # Higher noise values correspond to patches we keep.
+        ids_shuffle = torch.argsort(window, dim=1, descending=True)
 
+        # Generate "un-shuffle" indices to map patches back to original spatial grid
         ids_restore = torch.argsort(ids_shuffle, dim=1)
 
-        # keep the first subset
+        # Extract the exact indices of the patches the encoder will process
         ids_keep = ids_shuffle[:, :len_keep]
 
-        # generate the binary mask: 0 is keep, 1 is remove
+        # Generate binary mask: 0 is keep (visible to encoder), 1 is remove (masked)
         mask = torch.ones([N, L], device=self.device)
         mask[:, :len_keep] = 0
-        # unshuffle to get the binary mask
+        
+        # Un-shuffle the mask back to its original spatial arrangement
         mask = torch.gather(mask, dim=1, index=ids_restore)
 
-        # Reshape the mask back to the window shape
         return mask, ids_restore, ids_keep
     
     def plotFFT(self, pattern, plt_name="fig.png", show=False):
