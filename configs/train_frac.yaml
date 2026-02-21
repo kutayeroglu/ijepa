@@ -12,7 +12,7 @@ data:
   use_color_distortion: false
   use_gaussian_blur: false
   use_horizontal_flip: false  
-  train_fraction: 0.001
+  train_fraction: 0.01
 logging:
   folder: /mnt/logs/ijepa/pretraining
   write_tag: jepa
