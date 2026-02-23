@@ -31,8 +31,11 @@ python3 "$HOME/projects/ijepa/main_linprobe.py" \
     --dataset_dir "$DATA_DIR" \
     --val_dir "$VAL_DATA_DIR" \
     --model_path "$MODEL_PATH" \
-    --batch_size 128 \
-    --learning_rate 0.001 \
+    --batch_size 16 \
+    --learning_rate 4.88e-5 \
+    --train_frac 0.1 \
+    --val_frac 1.0 \
+    --num_epochs 15 \
     ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"
