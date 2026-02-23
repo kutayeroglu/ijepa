@@ -11,10 +11,28 @@ from multiprocessing import Value
 
 from logging import getLogger
 
+import numpy as np
 import torch
+from torchvision import transforms
 
 _GLOBAL_SEED = 0
 logger = getLogger()
+
+
+class NormalizeBySliceMax:
+    """Normalize each slice of the image tensor by its maximum."""
+
+    def __init__(self):
+        pass
+
+    def __call__(self, img):
+        # Assuming img is a PyTorch tensor with shape [L, W, W]
+        max_values = img.max(dim=-1).values.max(dim=-1).values
+        max_values = max_values.unsqueeze(1).unsqueeze(2)
+        return img / max_values
+
+    def __repr__(self):
+        return self.__class__.__name__
 
 
 class MaskCollator(object):
@@ -30,6 +48,8 @@ class MaskCollator(object):
         min_keep=4,
         allow_overlap=False,
         debug_log=False,
+        color_noise_path="noise_colors/green/green_noise_data_3072.npz",
+        color_mask_ratio=0.3,
     ):
         super(MaskCollator, self).__init__()
         if not isinstance(input_size, tuple):
@@ -60,6 +80,54 @@ class MaskCollator(object):
                 enc_mask_scale, pred_mask_scale, aspect_ratio, nenc, npred,
                 min_keep, allow_overlap,
             )
+
+        # -- Color Noise Initialization
+        self.color_mask_ratio = color_mask_ratio
+        self.trans_sequence = transforms.Compose([
+            transforms.RandomCrop(self.height), # Crop to [self.height, self.width] which is [14, 14]
+            transforms.RandomHorizontalFlip(p=0.5),
+            transforms.RandomVerticalFlip(p=0.5),
+            NormalizeBySliceMax()
+        ])
+        self._load_color_pattern(color_noise_path)
+
+    def _load_color_pattern(self, data_path):
+        try:
+            image_tensor = np.load(data_path)
+            image_tensor = torch.from_numpy(image_tensor[image_tensor.files[0]]) 
+            if "green" in data_path:
+                logger.info(f"=========> Loading Green Noise Patterns: {data_path} <=========")
+            elif "blue" in data_path:
+                logger.info(f"=========> Loading Blue Noise Patterns: {data_path} <=========")
+            elif "purple" in data_path:
+                logger.info(f"=========> Loading Purple Noise Patterns: {data_path} <=========")
+            elif "red" in data_path:
+                logger.info(f"=========> Loading Red Noise Patterns: {data_path} <=========")
+            elif "white" in data_path:
+                logger.info(f"=========> Loading White Noise Patterns: {data_path} <=========")
+
+        except Exception as e:
+            raise Exception(f"Color Noise patterns not found at {data_path}. Error: {e}")
+            
+        self.image_tensor = image_tensor
+        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        self.image_tensor = self.image_tensor.to(self.device)
+
+    def _extract_noise_windows(self, B):
+        L, M, N = self.image_tensor.shape  
+        windows = []
+        full_iterations = B // L
+        residual = B % L
+
+        for _ in range(full_iterations):
+            w_tensor = self.trans_sequence(self.image_tensor) 
+            windows.append(w_tensor) 
+            
+        if residual > 0:
+            w_tensor = self.trans_sequence(self.image_tensor)[:residual]
+            windows.append(w_tensor)
+
+        return torch.concatenate(windows, dim=0)
 
     def step(self):
         i = self._itr_counter
@@ -97,6 +165,7 @@ class MaskCollator(object):
     def _sample_block_mask(
         self, 
         b_size: tuple[int, int], 
+        noise_grid: torch.Tensor,
         acceptable_regions: list[torch.Tensor] | None = None, 
         log_detail: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -130,6 +199,34 @@ class MaskCollator(object):
             left = torch.randint(0, self.width - w, (1,))  # maximum valid left position
             mask = torch.zeros((self.height, self.width), dtype=torch.int32)
             mask[top : top + h, left : left + w] = 1  # mark masked region as 1
+            
+            # --- COLOR NOISE THRESHOLDING 
+            if self.color_mask_ratio > 0.0:
+                # 1. Get the current active patches in the box
+                box_indices_2d = torch.nonzero(mask)
+                total_in_box = box_indices_2d.shape[0]
+                
+                if total_in_box > 0:
+                    # 2. Extract specifically the noise values for those patches
+                    # noise_grid is [self.height, self.width]
+                    box_noise_values = noise_grid[box_indices_2d[:, 0], box_indices_2d[:, 1]]
+                    
+                    # 3. Sort those noise values descending
+                    ids_shuffle = torch.argsort(box_noise_values, descending=True)
+                    
+                    # 4. Calculate how many to keep
+                    len_keep = int(total_in_box * (1 - self.color_mask_ratio))
+                    
+                    # 5. Get the indices (relative to the box elements) of the ones we drop
+                    ids_drop = ids_shuffle[len_keep:]
+                    
+                    # 6. Map those dropped localized indices back to their 2D image coordinates
+                    drop_coords_2d = box_indices_2d[ids_drop]
+                    
+                    # 7. Set those coordinates back to 0 in the 2D mask!
+                    mask[drop_coords_2d[:, 0], drop_coords_2d[:, 1]] = 0
+            # --- 
+            
             # -- Constrain mask to a set of acceptable regions
             if acceptable_regions is not None:
                 constrain_mask(mask, tries)
@@ -202,13 +299,20 @@ class MaskCollator(object):
         if self.debug_log:
             logger.info("[multiblock] __call__: e_size=%s", e_size)
 
+        # Generate continuous color noise field for exactly B batches
+        # batch_noise_grids shape: [B, self.height, self.width]
+        batch_noise_grids = self._extract_noise_windows(B)
+
         collated_masks_pred, collated_masks_enc = [], []
         min_keep_pred = self.height * self.width # maximum num of patches -> safe upper bound
         min_keep_enc = self.height * self.width # maximum num of patches -> safe upper bound
-        for _ in range(B):
+        for i in range(B):
+            # The current image's global noise field
+            noise_grid = batch_noise_grids[i]
+            
             masks_p, masks_C = [], []
             for _ in range(self.npred):
-                mask, mask_C = self._sample_block_mask(p_size, log_detail=log_detail)
+                mask, mask_C = self._sample_block_mask(p_size, noise_grid=noise_grid, log_detail=log_detail)
                 masks_p.append(mask)  # target block mask
                 masks_C.append(mask_C)  # target block complement mask
                 min_keep_pred = min(min_keep_pred, len(mask)) # track min size so all target masks can be truncated to the same length for batch collation
@@ -224,7 +328,7 @@ class MaskCollator(object):
             masks_e = []
             for _ in range(self.nenc):
                 mask, _ = self._sample_block_mask(
-                    e_size, acceptable_regions=acceptable_regions, log_detail=log_detail
+                    e_size, noise_grid=noise_grid, acceptable_regions=acceptable_regions, log_detail=log_detail
                 )
                 masks_e.append(mask)
                 min_keep_enc = min(min_keep_enc, len(mask)) # track min size so all context masks can be truncated to the same length for batch collation

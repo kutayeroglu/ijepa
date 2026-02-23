@@ -94,14 +94,23 @@ if __name__ == "__main__":
         default=None,
         help="Path to ground truth labels file for flat validation structure (default: None)",
     )
+    parser.add_argument(
+        "--model_path",
+        type=str,
+        default=None,
+        help="Path to checkpoint file (default: uses pretrained_models/IN1K-vit.h.14-300e.pth.tar)",
+    )
 
     args = parser.parse_args()
 
     # Params
     script_dir = os.path.dirname(__file__)
-    model_dir = os.path.join(script_dir, "pretrained_models")
-    model_file_name = "IN1K-vit.h.14-300e.pth.tar"
-    model_path = os.path.join(model_dir, model_file_name)
+    if args.model_path:
+        model_path = os.path.expanduser(args.model_path)
+    else:
+        model_dir = os.path.join(script_dir, "pretrained_models")
+        model_file_name = "IN1K-vit.h.14-300e.pth.tar"
+        model_path = os.path.join(model_dir, model_file_name)
 
     dataset_dir = os.path.expanduser(args.dataset_dir)
     val_dir = os.path.expanduser(args.val_dir) if args.val_dir else None
@@ -121,6 +130,7 @@ if __name__ == "__main__":
         logger.info(f"Loaded model successfully from: {model_path}")
     except Exception as e:
         logger.exception(f"Error loading the model from {model_path}: {e}")
+        raise
 
     # NOTE: which one to use from checkpoint: encoder or target_encoder?? why?
     encoder = checkpoint["target_encoder"]
