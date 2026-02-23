@@ -6,10 +6,10 @@
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
 #SBATCH --container-mounts /stratch/dataset:/datasets
-#SBATCH --gpus=1
+#SBATCH --gpus=3
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=40G
-#SBATCH --time=05:00:00
+#SBATCH --time=2-05:00:00
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
@@ -40,7 +40,7 @@ echo "--- Executing main script ---"
 # Build command with optional extra args
 CMD_ARGS=(
     --fname configs/HPC_in1k_vith14_ep300.yaml
-    --devices cuda:0
+    --devices cuda:0 cuda:1 cuda:2
 )
 
 # Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)
