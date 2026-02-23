@@ -30,7 +30,7 @@ MODEL_PATH="/users/kutay.eroglu/logs/ijepa/pretraining/pretraining/uskumru-multn
 python3 "$HOME/projects/ijepa/main_linprobe.py" \
     --dataset_dir "$DATA_DIR" \
     --val_dir "$VAL_DATA_DIR" \
-    --model_path "$MODEL_PATH" \    
+    --model_path "$MODEL_PATH" \
     --batch_size 128 \
     --learning_rate 0.001 \
     ${EXTRA_ARGS}
