@@ -9,7 +9,7 @@
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=32G
-#SBATCH --time=00:30:00
+#SBATCH --time=20:30:00
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
@@ -40,7 +40,6 @@ echo "--- Executing main script ---"
 # Build command with optional extra args
 CMD_ARGS=(
     --fname configs/train_frac_green.yaml
-    --devices cuda:0
 )
 
 # Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)
