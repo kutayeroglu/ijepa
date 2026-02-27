@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=ijepa_frac
+#SBATCH --job-name=df_mblock
 #SBATCH --qos=acc_debug 
 #SBATCH --account=etur91 
 #SBATCH --time=01:05:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
-#SBATCH --output=ijepa_%j.out
-#SBATCH --error=ijepa_%j.err
+#SBATCH --output=df_mblock_%j.out
+#SBATCH --error=df_mblock_%j.err
 #SBATCH --chdir=.
 
 set -e
@@ -23,22 +23,29 @@ REAL_LOG_PATH="$SCRATCH_DIR/logs"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
 
 mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
-mkdir -p "$LOCAL_DATA_DIR/train" "$LOCAL_DATA_DIR/val"
+mkdir -p "$LOCAL_DATA_DIR/train"
 
 # --- Data Staging (The bottleneck) ---
 echo "--- Staging and Extracting Data to Local SSD ($TMPDIR) ---"
 
 # Extract Main Train Tar
+echo "Extracting main train tar from GPFS..."
 tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_train.tar" -C "$LOCAL_DATA_DIR/train"
 
 # Extract sub-tars (This takes a long time!)
-echo "Extracting class sub-tars..."
+echo "Extracting class sub‑tars in parallel..."
 cd "$LOCAL_DATA_DIR/train"
-find . -name "*.tar" | xargs -I {} sh -c "mkdir -p \${1%.tar} && tar -xf \$1 -C \${1%.tar} && rm \$1" -- {}
+# find . -name "*.tar" | xargs -I {} sh -c "mkdir -p \${1%.tar} && tar -xf \$1 -C \${1%.tar} && rm \$1" -- {}
+find . -name "*.tar" -print0 | xargs -0 -P 8 -I {} sh -c '
+    dir="${1%.tar}"
+    mkdir -p "$dir"
+    tar -xf "$1" -C "$dir"
+    rm "$1"
+' -- {}
 cd -
 
 # Extract Validation
-tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_val.tar" -C "$LOCAL_DATA_DIR/val"
+# tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_val.tar" -C "$LOCAL_DATA_DIR/val"
 
 echo "--- Data extraction complete ---"
 
