@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=df_mnoise
-#SBATCH --qos=acc_debug 
+#SBATCH --job-name=aw_mnoise
+#SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91 
-#SBATCH --time=01:05:00
+#SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=20
-#SBATCH --gres=gpu:1
-#SBATCH --output=df_mnoise_%j.out
-#SBATCH --error=df_mnoise_%j.err
+#SBATCH --cpus-per-task=80
+#SBATCH --gres=gpu:4
+#SBATCH --output=aw_mnoise_%j.out
+#SBATCH --error=aw_mnoise_%j.err
 #SBATCH --chdir=.
 
 set -e
@@ -52,14 +52,14 @@ BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs,$GREEN_NO
 SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
 
 CMD_ARGS=(
-    --fname configs/train_frac_green.yaml
-    --devices cuda:0
+    --fname configs/lufer_mnoise.yaml
+    --devices cuda:0 cuda:1 cuda:2 cuda:3
 )
 
 module purge
 module load singularity/4.1.5
 
-echo "--- Executing I-JEPA (green mask) ---"
+echo "--- Executing I-JEPA (noise mask) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
     "$SIF_IMAGE" \

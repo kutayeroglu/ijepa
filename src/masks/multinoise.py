@@ -49,7 +49,7 @@ class MaskCollator(object):
         allow_overlap=False,
         debug_log=False,
         color_noise_path="noise_colors/green/green_noise_data_3072.npz",
-        color_mask_ratio=0.3,
+        color_mask_ratio=0.3, # ratio of patches to drop from initially selected blocks 
     ):
         super(MaskCollator, self).__init__()
         if not isinstance(input_size, tuple):
@@ -84,7 +84,7 @@ class MaskCollator(object):
         # -- Color Noise Initialization
         self.color_mask_ratio = color_mask_ratio
         self.trans_sequence = transforms.Compose([
-            transforms.RandomCrop(self.height), # Crop to [self.height, self.width] which is [14, 14]
+            transforms.RandomCrop(self.height), # Crop to [self.height, self.width] which is [14, 14] for ViT/14
             transforms.RandomHorizontalFlip(p=0.5),
             transforms.RandomVerticalFlip(p=0.5),
             NormalizeBySliceMax()
@@ -113,7 +113,24 @@ class MaskCollator(object):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.image_tensor = self.image_tensor.to(self.device)
 
-    def _extract_noise_windows(self, B):
+    def _extract_noise_windows(self, B: int) -> torch.Tensor:
+        """
+        Produce B augmented noise grids from the stored noise pattern collection.
+
+        self.image_tensor has shape [L, M, N] where L is the number of
+        stored noise patterns. Each call to self.trans_sequence applies a
+        random transformation (crop, flip, normalize) to ALL L patterns at
+        once, yielding [L, height, width].
+
+        To cover a batch of size B:
+          - full_iterations = B // L  full passes, each transforming all L
+            patterns with a fresh random augmentation.
+          - If B % L > 0, one additional pass transforms all L patterns and
+            only the first `residual` grids are kept.
+
+        Returns:
+            Tensor of shape [B, height, width].
+        """
         L, M, N = self.image_tensor.shape  
         windows = []
         full_iterations = B // L
@@ -162,10 +179,10 @@ class MaskCollator(object):
         # e.g., if p_size = (8, 12), the block is 8 patches tall and 12 patches wide
         return (h, w)
 
-    def _sample_block_mask(
+    def _sample_noisy_block_mask(
         self, 
         b_size: tuple[int, int], 
-        noise_grid: torch.Tensor,
+        noise_grid: torch.Tensor, # shape: [self.height, self.width]
         acceptable_regions: list[torch.Tensor] | None = None, 
         log_detail: bool = False
     ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -200,7 +217,9 @@ class MaskCollator(object):
             mask = torch.zeros((self.height, self.width), dtype=torch.int32)
             mask[top : top + h, left : left + w] = 1  # mark masked region as 1
             
-            # --- COLOR NOISE THRESHOLDING 
+            # --- COLOR NOISE THRESHOLDING
+            # Drop color_mask_ratio of patches from the block, keeping those
+            # with the highest noise values (spatially-structured dropout).
             if self.color_mask_ratio > 0.0:
                 # 1. Get the current active patches in the box
                 box_indices_2d = torch.nonzero(mask)
@@ -208,7 +227,6 @@ class MaskCollator(object):
                 
                 if total_in_box > 0:
                     # 2. Extract specifically the noise values for those patches
-                    # noise_grid is [self.height, self.width]
                     box_noise_values = noise_grid[box_indices_2d[:, 0], box_indices_2d[:, 1]]
                     
                     # 3. Sort those noise values descending
@@ -256,7 +274,7 @@ class MaskCollator(object):
             top_val = top.item() if top.dim() > 0 else int(top)
             left_val = left.item() if left.dim() > 0 else int(left)
             logger.info(
-                "[multiblock] _sample_block_mask: b_size=%s top=%s left=%s len(mask)=%s tries=%s",
+                "[multiblock] _sample_noisy_block_mask: b_size=%s top=%s left=%s len(mask)=%s tries=%s",
                 b_size, top_val, left_val, len(mask), tries,
             )
         return mask, mask_complement
@@ -287,8 +305,6 @@ class MaskCollator(object):
             label="pred",
             log_detail=log_detail,
         )
-        if self.debug_log:
-            logger.info("[multiblock] __call__: p_size=%s", p_size)
         e_size = self._sample_block_size(  # block size for context block [h,w (in number of patches)]
             generator=g,
             scale=self.enc_mask_scale,
@@ -296,10 +312,8 @@ class MaskCollator(object):
             label="enc",
             log_detail=log_detail,
         )
-        if self.debug_log:
-            logger.info("[multiblock] __call__: e_size=%s", e_size)
 
-        # Generate continuous color noise field for exactly B batches
+        # Generate continuous color noise field for a batch of size B
         # batch_noise_grids shape: [B, self.height, self.width]
         batch_noise_grids = self._extract_noise_windows(B)
 
@@ -312,7 +326,7 @@ class MaskCollator(object):
             
             masks_p, masks_C = [], []
             for _ in range(self.npred):
-                mask, mask_C = self._sample_block_mask(p_size, noise_grid=noise_grid, log_detail=log_detail)
+                mask, mask_C = self._sample_noisy_block_mask(p_size, noise_grid=noise_grid, log_detail=log_detail)
                 masks_p.append(mask)  # target block mask
                 masks_C.append(mask_C)  # target block complement mask
                 min_keep_pred = min(min_keep_pred, len(mask)) # track min size so all target masks can be truncated to the same length for batch collation
@@ -327,7 +341,7 @@ class MaskCollator(object):
 
             masks_e = []
             for _ in range(self.nenc):
-                mask, _ = self._sample_block_mask(
+                mask, _ = self._sample_noisy_block_mask(
                     e_size, noise_grid=noise_grid, acceptable_regions=acceptable_regions, log_detail=log_detail
                 )
                 masks_e.append(mask)

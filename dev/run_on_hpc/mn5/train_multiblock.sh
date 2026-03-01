@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=df_mblock
-#SBATCH --qos=acc_debug 
+#SBATCH --job-name=aw_mblock
+#SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91 
-#SBATCH --time=01:05:00
+#SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
-#SBATCH --cpus-per-task=20
-#SBATCH --gres=gpu:1
-#SBATCH --output=df_mblock_%j.out
-#SBATCH --error=df_mblock_%j.err
+#SBATCH --cpus-per-task=80
+#SBATCH --gres=gpu:4
+#SBATCH --output=aw_mblock_%j.out
+#SBATCH --error=aw_mblock_%j.err
 #SBATCH --chdir=.
 
 set -e
@@ -44,9 +44,6 @@ find . -name "*.tar" -print0 | xargs -0 -P 8 -I {} sh -c '
 ' -- {}
 cd -
 
-# Extract Validation
-# tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_val.tar" -C "$LOCAL_DATA_DIR/val"
-
 echo "--- Data extraction complete ---"
 
 # --- Container Execution ---
@@ -54,14 +51,14 @@ BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
 SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
 
 CMD_ARGS=(
-    --fname configs/train_frac.yaml
-    --devices cuda:0
+    --fname configs/lufer_mblock.yaml
+    --devices cuda:0 cuda:1 cuda:2 cuda:3
 )
 
 module purge
 module load singularity/4.1.5
 
-echo "--- Executing I-JEPA ---"
+echo "--- Executing I-JEPA (multiblock) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
     "$SIF_IMAGE" \
