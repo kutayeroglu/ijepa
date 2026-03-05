@@ -153,7 +153,7 @@ def get_imagenet_dataloaders(
         sampler=train_sampler,
         num_workers=num_workers,
         pin_memory=True,
-        drop_last=True,
+        drop_last=False,
     )
 
     val_loader = DataLoader(

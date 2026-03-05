@@ -24,7 +24,6 @@ def train_linear_probe(
 ):
     """Training loop"""
     logger.info("Starting linear probe training")
-    logger.info(f"Hyperparameters: lr={learning_rate}, epochs={num_epochs}")
 
     # Mode configuration
     model.encoder.eval()
@@ -38,6 +37,19 @@ def train_linear_probe(
     )
     scheduler = StepLR(optimizer, step_size=15, gamma=0.1)
     criterion = nn.CrossEntropyLoss()
+
+    logger.info(
+        f"Hyperparameters: lr={learning_rate}, epochs={num_epochs}, "
+        f"optimizer={optimizer.__class__.__name__}(weight_decay={optimizer.defaults['weight_decay']}), "
+        f"scheduler={scheduler.__class__.__name__}(step_size={scheduler.step_size}, gamma={scheduler.gamma}), "
+        f"criterion={criterion.__class__.__name__}, device={device}"
+    )
+
+    if len(train_loader) == 0:
+        raise ValueError(
+            "Train loader has 0 batches. "
+            "Check that train_frac * num_samples >= batch_size."
+        )
 
     # --- TRAINING ---
     best_acc = 0.0
