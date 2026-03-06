@@ -26,15 +26,15 @@ mask:
   min_keep: 10
   num_enc_masks: 1
   num_pred_masks: 4
-  patch_size: 14
+  patch_size: 16
   pred_mask_scale:
   - 0.15
   - 0.2
 meta:
   copy_data: false
   load_checkpoint: false
-  model_name: vit_huge
-  pred_depth: 12
+  model_name: vit_base
+  pred_depth: 6
   pred_emb_dim: 384
   read_checkpoint: null
   use_bfloat16: true

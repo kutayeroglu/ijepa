@@ -1,15 +1,15 @@
 #!/bin/bash
 
-#SBATCH --job-name=ijepa_main_training 
-#SBATCH --output=logs/ijepa_main_training-%j.out
-#SBATCH --error=logs/ijepa_main_training-%j.err
+#SBATCH --job-name=mblock
+#SBATCH --output=logs/mblock-%j.out
+#SBATCH --error=logs/mblock-%j.err
 
 #SBATCH --container-image ghcr.io\#kutayeroglu/ijepa
 #SBATCH --container-mounts /stratch/dataset:/datasets
-#SBATCH --gpus=3
+#SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
-#SBATCH --mem-per-gpu=40G
-#SBATCH --time=2-05:00:00
+#SBATCH --mem-per-gpu=20G
+#SBATCH --time=01:00:00
 
 # Exit immediately if a command exits with a non-zero status.
 set -e
@@ -39,8 +39,8 @@ echo "--- Executing main script ---"
 
 # Build command with optional extra args
 CMD_ARGS=(
-    --fname configs/HPC_in1k_vith14_ep300.yaml
-    --devices cuda:0 cuda:1 cuda:2
+    --fname configs/bounhpc_in1k_vith14_ep300.yaml
+    --devices cuda:0
 )
 
 # Add EXTRA_ARGS if provided (split by spaces to handle multiple arguments)
