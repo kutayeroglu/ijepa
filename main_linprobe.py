@@ -49,32 +49,32 @@ if __name__ == "__main__":
     parser.add_argument(
         "--batch_size",
         type=int,
-        default=32,
+        default=128,
         help="Batch size (default: 32)",
     )
     parser.add_argument(
         "--num_workers",
         type=int,
-        default=4,
-        help="Number of data loading workers (default: 4)",
+        default=8,
+        help="Number of data loading workers (default: 8)",
     )
     parser.add_argument(
         "--train_frac",
         type=float,
-        default=0.005,
-        help="Fraction of training data to use (default: 0.005)",
+        default=1.0,
+        help="Fraction of training data to use (default: 1.0)",
     )
     parser.add_argument(
         "--val_frac",
         type=float,
-        default=0.1,
-        help="Fraction of validation data to use (default: 0.1)",
+        default=1.0,
+        help="Fraction of validation data to use (default: 1.0)",
     )
     parser.add_argument(
         "--num_epochs",
         type=int,
-        default=3,
-        help="Number of training epochs (default: 3)",
+        default=50,
+        help="Number of training epochs (default: 100)",
     )
     parser.add_argument(
         "--learning_rate",
@@ -102,6 +102,7 @@ if __name__ == "__main__":
     )
 
     args = parser.parse_args()
+    logger.info(f"All arguments: {vars(args)}")
 
     # Params
     script_dir = os.path.dirname(__file__)
@@ -160,7 +161,12 @@ if __name__ == "__main__":
         num_classes=1000,
     )
 
-    logger.info("Created model with linear head")
+    logger.info(
+        f"Model config: patch_size={vit_h_encoder.patch_embed.patch_size}, "
+        f"img_size={vit_h_encoder.patch_embed.img_size}, "
+        f"embed_dim={model.classifier.in_features}, "
+        f"num_classes={model.classifier.out_features}, encoder_key=target_encoder"
+    )
 
     # Get dataloaders
     train_loader, val_loader = get_imagenet_dataloaders(
