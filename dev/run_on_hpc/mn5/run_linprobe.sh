@@ -80,6 +80,7 @@ singularity exec --nv \
         --model_path "$MODEL_PATH" \
         --batch_size 2048 \
         --learning_rate 0.00625 \
+        --weight_decay 0.0005 \
         ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"

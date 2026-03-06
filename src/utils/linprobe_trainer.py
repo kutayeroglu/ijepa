@@ -4,7 +4,6 @@ import logging
 from tqdm import tqdm
 import torch
 import torch.nn as nn
-from torch.optim import AdamW
 from torch.optim.lr_scheduler import StepLR
 
 from src.utils.plot import plot_loss_curves
@@ -19,6 +18,7 @@ def train_linear_probe(
     val_loader,
     num_epochs,
     learning_rate,
+    weight_decay,
     device,
     outputs_dir,
 ):
@@ -29,11 +29,11 @@ def train_linear_probe(
     model.encoder.eval()
     model = model.to(device)
 
-    # NOTE: Paper uses LARS optimizer
-    # Used in large batches
-    # https://paperswithcode.com/method/lars
-    optimizer = AdamW(
-        model.classifier.parameters(), lr=learning_rate, weight_decay=0.0005
+    optimizer = torch.optim.SGD(
+        model.classifier.parameters(),
+        lr=learning_rate,
+        momentum=0.9,
+        weight_decay=weight_decay,
     )
     scheduler = StepLR(optimizer, step_size=15, gamma=0.1)
     criterion = nn.CrossEntropyLoss()

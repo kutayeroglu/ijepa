@@ -79,8 +79,14 @@ if __name__ == "__main__":
     parser.add_argument(
         "--learning_rate",
         type=float,
-        default=0.1,
-        help="Learning rate (default: 0.1)",
+        default=0.00625,
+        help="Learning rate (default: 0.00625, linearly scaled from 0.05 for BS=2048)",
+    )
+    parser.add_argument(
+        "--weight_decay",
+        type=float,
+        default=0.0005,
+        help="Weight decay (default: 0.0005)",
     )
     parser.add_argument(
         "--device",
@@ -186,6 +192,7 @@ if __name__ == "__main__":
         val_loader=val_loader,
         num_epochs=args.num_epochs,
         learning_rate=args.learning_rate,
+        weight_decay=args.weight_decay,
         device=args.device,
         outputs_dir=outputs_dir,
     )

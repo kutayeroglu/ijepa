@@ -80,6 +80,7 @@ singularity exec --nv \
         --model_path "$MODEL_PATH" \
         --batch_size 2048 \
         --learning_rate 0.00625 \
+        --weight_decay 0.0005 \
         --train_frac 0.1 \
         --num_epochs 5 \
         ${EXTRA_ARGS}

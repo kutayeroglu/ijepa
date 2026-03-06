@@ -1,6 +1,6 @@
 #!/bin/bash
 #SBATCH --job-name=aw2_probe
-#SBATCH --qos=acc_debug
+#SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
 #SBATCH --time=00:30:00
 #SBATCH --ntasks=1
@@ -80,6 +80,7 @@ singularity exec --nv \
         --model_path "$MODEL_PATH" \
         --batch_size 2048 \
         --learning_rate 0.00625 \
+        --weight_decay 0.0005 \
         ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"
