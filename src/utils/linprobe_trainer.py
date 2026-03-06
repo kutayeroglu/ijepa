@@ -59,11 +59,18 @@ def train_linear_probe(
         train_loss, train_correct, train_total = 0.0, 0, 0
 
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Train]")
-        for images, labels in train_pbar:
+        for batch_idx, (images, labels) in enumerate(train_pbar):
             images, labels = images.to(device), labels.to(device)
 
             outputs = model(images)
             loss = criterion(outputs, labels)
+
+            if epoch == 0 and batch_idx == 0:
+                _, preds = outputs.max(1)
+                logger.info(f"[DIAG] Train batch 0 — labels[:20]: {labels[:20].tolist()}")
+                logger.info(f"[DIAG] Train batch 0 — preds[:20]:  {preds[:20].tolist()}")
+                logger.info(f"[DIAG] Train batch 0 — unique labels: {labels.unique().numel()}, unique preds: {preds.unique().numel()}")
+                logger.info(f"[DIAG] Train batch 0 — loss: {loss.item():.6f}")
 
             optimizer.zero_grad()
             loss.backward()
@@ -88,10 +95,17 @@ def train_linear_probe(
         val_loss, val_correct, val_total = 0.0, 0, 0
         with torch.no_grad():
             val_pbar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Val]")
-            for images, labels in val_pbar:
+            for batch_idx, (images, labels) in enumerate(val_pbar):
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
                 loss = criterion(outputs, labels)
+
+                if epoch == 0 and batch_idx == 0:
+                    _, preds = outputs.max(1)
+                    logger.info(f"[DIAG] Val batch 0 — labels[:20]:  {labels[:20].tolist()}")
+                    logger.info(f"[DIAG] Val batch 0 — preds[:20]:   {preds[:20].tolist()}")
+                    logger.info(f"[DIAG] Val batch 0 — unique labels: {labels.unique().numel()}, unique preds: {preds.unique().numel()}")
+                    logger.info(f"[DIAG] Val batch 0 — loss: {loss.item():.6f}")
 
                 val_loss += loss.item()
                 _, predicted = outputs.max(1)

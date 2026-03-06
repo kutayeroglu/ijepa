@@ -88,6 +88,9 @@ def get_imagenet_dataloaders(
     train_dataset = datasets.ImageFolder(
         os.path.join(data_dir, "train"), transform=train_transform
     )
+    print(f"Train classes: {len(train_dataset.classes)}, samples: {len(train_dataset)}")
+    print(f"  Train first 5 classes: {train_dataset.classes[:5]}")
+    print(f"  Train class_to_idx match val? (check below)")
 
     # Handle validation dataset: check if it's in subdirectories or flat structure
     resolved_val_dir = val_dir if val_dir is not None else os.path.join(data_dir, "val")
@@ -109,6 +112,11 @@ def get_imagenet_dataloaders(
         # Use ImageFolder for subdirectory structure (local format)
         val_dataset = datasets.ImageFolder(resolved_val_dir, transform=val_transform)
         print("Using ImageFolder for validation (subdirectory structure)")
+        print(f"  Val classes: {len(val_dataset.classes)}, samples: {len(val_dataset)}")
+        print(f"  Val first 5 classes: {val_dataset.classes[:5]}")
+        print(f"  Val last 5 classes: {val_dataset.classes[-5:]}")
+        print(f"  Val first 10 targets: {val_dataset.targets[:10]}")
+        print(f"  Val unique targets: {len(set(val_dataset.targets))}")
     else:
         # Use custom dataset for flat structure (HPC format)
         if val_labels_file is None:
