@@ -1,12 +1,58 @@
 #!/usr/bin/env python3
 """
-Generates a 6-panel figure for an academic paper illustrating the mask
-selection process in src/masks/multinoise.py, overlaid on a real image.
+Generates a 6-panel figure illustrating the mask selection process of
+MaskCollator (src/masks/multinoise.py) overlaid on a real image.
+
+The script calls the same internal methods as MaskCollator.__call__ in
+the same order: sample block sizes, extract a colored-noise grid, sample
+npred target masks (with spatially-structured dropout via noise
+thresholding), then sample a context mask constrained to lie outside all
+target bounding boxes.
 
 Panels (left to right):
   1. Original       – full input image
   2. Context        – only context-encoder patches visible
   3-6. Target 1--4  – only that target's patches visible
+
+Non-selected patches are replaced with a neutral gray.
+
+Usage
+-----
+Run from the project root. If ``src`` is not installed as a package,
+set PYTHONPATH so that ``from src.masks.multinoise import ...`` resolves::
+
+    export PYTHONPATH=/path/to/ijepa
+
+Minimal (defaults: 224px input, patch 14, 4 targets, seed 42)::
+
+    python visualization/visualize_masks.py --image_path photo.jpg
+
+Custom scales and output format::
+
+    python visualization/visualize_masks.py \
+        --image_path photo.jpg \
+        --pred_mask_scale 0.10 0.25 \
+        --enc_mask_scale  0.80 1.0  \
+        --color_mask_ratio 0.4 \
+        --seed 7 \
+        --output visualization/masks.png
+
+All arguments::
+
+    python visualization/visualize_masks.py \
+        --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz \
+        --output visualization/mask_visualization.pdf \
+        --seed 42 \
+        --input_size 224 \
+        --patch_size 14 \
+        --pred_mask_scale 0.15 0.2 \
+        --enc_mask_scale 0.85 1.0 \
+        --aspect_ratio 0.75 1.5 \
+        --color_mask_ratio 0.3 \
+        --npred 4 \
+        --min_keep 10 \
+        --dpi 300
 """
 
 import argparse
@@ -25,7 +71,7 @@ from src.masks.multinoise import MaskCollator
 # Helpers
 # ---------------------------------------------------------------------------
 
-GRAY_VALUE = 186
+DIM_ALPHA = 0.25
 
 
 def _indices_to_2d(mask_1d: torch.Tensor, H: int, W: int) -> torch.Tensor:
@@ -37,8 +83,8 @@ def _indices_to_2d(mask_1d: torch.Tensor, H: int, W: int) -> torch.Tensor:
 
 def apply_patch_mask(image: np.ndarray, mask_2d: torch.Tensor,
                      patch_size: int) -> np.ndarray:
-    """Return a copy of *image* with non-selected patches replaced by gray."""
-    out = np.full_like(image, GRAY_VALUE)
+    """Return a copy of *image* with non-selected patches dimmed."""
+    out = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
     H_p, W_p = mask_2d.shape
     for r in range(H_p):
         for c in range(W_p):
@@ -71,8 +117,9 @@ def main():
     parser.add_argument('--noise_path', type=str,
                         default='green_noise_data_3072.npz',
                         help='Path to color-noise .npz file')
-    parser.add_argument('--output', type=str, default='mask_visualization.pdf',
-                        help='Output file (pdf/png/svg)')
+    parser.add_argument('--output', type=str, default=None,
+                        help='Output file (pdf/png/svg); defaults to '
+                             'visualization/mask_visualization_seed<N>.pdf')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--input_size', type=int, default=224)
     parser.add_argument('--patch_size', type=int, default=14)
@@ -87,6 +134,10 @@ def main():
     parser.add_argument('--min_keep', type=int, default=10)
     parser.add_argument('--dpi', type=int, default=300)
     args = parser.parse_args()
+
+    if args.output is None:
+        script_dir = Path(__file__).resolve().parent
+        args.output = str(script_dir / f'mask_visualization_seed{args.seed}.pdf')
 
     H = args.input_size // args.patch_size
     W = H
