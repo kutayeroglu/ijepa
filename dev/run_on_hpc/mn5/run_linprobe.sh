@@ -35,7 +35,7 @@ tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_train.tar" --strip-components=1 -C "$LOC
 # Extract class sub-tars in parallel
 echo "Extracting class sub-tars in parallel..."
 cd "$LOCAL_DATA_DIR/train"
-find . -name "*.tar" -print0 | xargs -0 -P 8 -I {} sh -c '
+find . -name "*.tar" -print0 | xargs -0 -P 20 -I {} sh -c '
     dir="${1%.tar}"
     mkdir -p "$dir"
     tar -xf "$1" -C "$dir"
@@ -81,6 +81,7 @@ singularity exec --nv \
         --batch_size 2048 \
         --learning_rate 0.00625 \
         --weight_decay 0.0005 \
+        --num_workers 18 \
         ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"
