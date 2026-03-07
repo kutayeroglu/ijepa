@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=aw_mnoise
+#SBATCH --job-name=balnoise
 #SBATCH --qos=acc_debug
 #SBATCH --account=etur91 
-#SBATCH --time=3-00:00:00
+#SBATCH --time=02:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=aw_mnoise_%j.out
-#SBATCH --error=aw_mnoise_%j.err
+#SBATCH --output=balon_noise_%j.out
+#SBATCH --error=balon_noise_%j.err
 #SBATCH --chdir=.
 
 set -e

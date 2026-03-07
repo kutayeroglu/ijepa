@@ -49,7 +49,7 @@ class MaskCollator(object):
         allow_overlap=False,
         debug_log=False,
         color_noise_path="noise_colors/green/green_noise_data_3072.npz",
-        color_mask_ratio=0.3, # ratio of patches to drop from initially selected blocks 
+        color_mask_ratio=0.15, # ratio of patches to drop from initially selected blocks 
     ):
         super(MaskCollator, self).__init__()
         if not isinstance(input_size, tuple):
