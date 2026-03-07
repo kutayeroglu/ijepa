@@ -38,11 +38,11 @@ Custom multinoise scales::
 
     python visualization/visualize_masks.py \
         --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz \
         --pred_mask_scale 0.10 0.25 \
         --enc_mask_scale  0.80 1.0  \
         --color_mask_ratio 0.4 \
-        --seed 7 \
-        --output visualization/masks.png
+        --seed 7
 
 Custom multiblock scales::
 
@@ -56,6 +56,7 @@ Custom multiblock scales::
 """
 
 import argparse
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib.pyplot as plt
@@ -121,9 +122,9 @@ def main():
     parser.add_argument('--noise_path', type=str,
                         default='green_noise_data_3072.npz',
                         help='Path to color-noise .npz file (multinoise only)')
-    parser.add_argument('--output', type=str, default=None,
-                        help='Output file (pdf/png/svg); defaults to '
-                             'visualization/mask_visualization_seed<N>.pdf')
+    parser.add_argument('--output_dir', type=str, default=None,
+                        help='Output directory; defaults to '
+                             'visualization/<timestamp>_<mask_type>_seed<N>/')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--input_size', type=int, default=224)
     parser.add_argument('--patch_size', type=int, default=14)
@@ -140,9 +141,13 @@ def main():
     parser.add_argument('--dpi', type=int, default=300)
     args = parser.parse_args()
 
-    if args.output is None:
+    if args.output_dir is None:
         script_dir = Path(__file__).resolve().parent
-        args.output = str(script_dir / f'mask_visualization_{args.mask_type}_seed{args.seed}.pdf')
+        stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        out_dir = script_dir / f'{stamp}_{args.mask_type}_seed{args.seed}'
+    else:
+        out_dir = Path(args.output_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
 
     H = args.input_size // args.patch_size
     W = H
@@ -236,39 +241,36 @@ def main():
         ctx_mask = _indices_to_2d(ctx_1d, H, W)
 
     # =====================================================================
-    # Draw figure: 6 panels
+    # Build per-panel images and their filenames
     # =====================================================================
-    fig, axes = plt.subplots(1, 6, figsize=(24, 4))
+    panels = [('original', image),
+              ('context', apply_patch_mask(image, ctx_mask, ps))]
+    for i in range(args.npred):
+        panels.append((f'target{i + 1}',
+                        apply_patch_mask(image, target_masks[i], ps)))
+
+    # -- Save individual panels --------------------------------------------
+    for name, img_arr in panels:
+        path = out_dir / f'{name}.png'
+        Image.fromarray(img_arr).save(str(path))
+        print(f'Saved {path.resolve()}')
+
+    # -- Save combined 6-panel figure --------------------------------------
+    n_panels = len(panels)
+    fig, axes = plt.subplots(1, n_panels, figsize=(4 * n_panels, 4))
     plt.subplots_adjust(wspace=0.06, left=0.005, right=0.995,
                         top=0.90, bottom=0.02)
 
-    titles = ['Original', 'Context',
-              'Target 1', 'Target 2', 'Target 3', 'Target 4']
-
-    # Panel 1: original image
-    axes[0].imshow(image)
-
-    # Panel 2: context
-    axes[1].imshow(apply_patch_mask(image, ctx_mask, ps))
-
-    # Panels 3-6: targets
-    for i in range(args.npred):
-        axes[2 + i].imshow(apply_patch_mask(image, target_masks[i], ps))
-
-    for ax, title in zip(axes, titles):
+    for ax, (name, img_arr) in zip(axes, panels):
+        ax.imshow(img_arr)
+        title = name.replace('target', 'Target ').title()
         ax.set_title(title, fontsize=11, pad=6)
         ax.set_axis_off()
 
-    # ---- save ------------------------------------------------------------
-    out = Path(args.output)
-    fig.savefig(str(out), dpi=args.dpi, bbox_inches='tight')
-    print(f'Saved {out.resolve()}')
-
-    for ext in ('.pdf', '.png'):
-        alt = out.with_suffix(ext)
-        if alt != out:
-            fig.savefig(str(alt), dpi=args.dpi, bbox_inches='tight')
-            print(f'Saved {alt.resolve()}')
+    for ext in ('png', 'pdf'):
+        path = out_dir / f'combined.{ext}'
+        fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+        print(f'Saved {path.resolve()}')
 
     plt.close(fig)
 
