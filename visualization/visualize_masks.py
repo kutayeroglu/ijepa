@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """
 Generates a 6-panel figure illustrating the mask selection process of
-MaskCollator (src/masks/multinoise.py) overlaid on a real image.
+either MaskCollator variant overlaid on a real image:
 
-The script calls the same internal methods as MaskCollator.__call__ in
-the same order: sample block sizes, extract a colored-noise grid, sample
-npred target masks (with spatially-structured dropout via noise
-thresholding), then sample a context mask constrained to lie outside all
-target bounding boxes.
+  - **multinoise** (src/masks/multinoise.py) – spatially-structured
+    dropout via colored-noise thresholding.
+  - **multiblock** (src/masks/multiblock.py) – axis-aligned rectangular
+    block masking (original I-JEPA strategy).
+
+Select the variant with ``--mask_type {multinoise,multiblock}``.
 
 Panels (left to right):
   1. Original       – full input image
@@ -19,15 +20,21 @@ Non-selected patches are replaced with a neutral gray.
 Usage
 -----
 Run from the project root. If ``src`` is not installed as a package,
-set PYTHONPATH so that ``from src.masks.multinoise import ...`` resolves::
+set PYTHONPATH so that the imports resolve::
 
     export PYTHONPATH=/path/to/ijepa
 
-Minimal (defaults: 224px input, patch 14, 4 targets, seed 42)::
+Multinoise (default)::
 
     python visualization/visualize_masks.py --image_path photo.jpg
 
-Custom scales and output format::
+Multiblock::
+
+    python visualization/visualize_masks.py \
+        --mask_type multiblock \
+        --image_path photo.jpg
+
+Custom multinoise scales::
 
     python visualization/visualize_masks.py \
         --image_path photo.jpg \
@@ -37,22 +44,15 @@ Custom scales and output format::
         --seed 7 \
         --output visualization/masks.png
 
-All arguments::
+Custom multiblock scales::
 
     python visualization/visualize_masks.py \
+        --mask_type multiblock \
         --image_path photo.jpg \
-        --noise_path green_noise_data_3072.npz \
-        --output visualization/mask_visualization.pdf \
-        --seed 42 \
-        --input_size 224 \
-        --patch_size 14 \
-        --pred_mask_scale 0.15 0.2 \
-        --enc_mask_scale 0.85 1.0 \
+        --pred_mask_scale 0.15 0.28 \
+        --enc_mask_scale  0.85 1.0  \
         --aspect_ratio 0.75 1.5 \
-        --color_mask_ratio 0.3 \
-        --npred 4 \
-        --min_keep 10 \
-        --dpi 300
+        --seed 7
 """
 
 import argparse
@@ -64,7 +64,8 @@ import torch
 from PIL import Image
 from torchvision import transforms as T
 
-from src.masks.multinoise import MaskCollator
+from src.masks.multiblock import MaskCollator as MultiblockCollator
+from src.masks.multinoise import MaskCollator as MultinoiseCollator
 
 
 # ---------------------------------------------------------------------------
@@ -112,11 +113,14 @@ def load_image(path: str, size: int) -> np.ndarray:
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument('--mask_type', type=str, default='multinoise',
+                        choices=['multinoise', 'multiblock'],
+                        help='Which mask collator to visualize')
     parser.add_argument('--image_path', type=str, required=True,
                         help='Path to input image (JPEG/PNG)')
     parser.add_argument('--noise_path', type=str,
                         default='green_noise_data_3072.npz',
-                        help='Path to color-noise .npz file')
+                        help='Path to color-noise .npz file (multinoise only)')
     parser.add_argument('--output', type=str, default=None,
                         help='Output file (pdf/png/svg); defaults to '
                              'visualization/mask_visualization_seed<N>.pdf')
@@ -129,7 +133,8 @@ def main():
                         default=[0.85, 1.0])
     parser.add_argument('--aspect_ratio', type=float, nargs=2,
                         default=[0.75, 1.5])
-    parser.add_argument('--color_mask_ratio', type=float, default=0.3)
+    parser.add_argument('--color_mask_ratio', type=float, default=0.3,
+                        help='Fraction of mask driven by color noise (multinoise only)')
     parser.add_argument('--npred', type=int, default=4)
     parser.add_argument('--min_keep', type=int, default=10)
     parser.add_argument('--dpi', type=int, default=300)
@@ -137,7 +142,7 @@ def main():
 
     if args.output is None:
         script_dir = Path(__file__).resolve().parent
-        args.output = str(script_dir / f'mask_visualization_seed{args.seed}.pdf')
+        args.output = str(script_dir / f'mask_visualization_{args.mask_type}_seed{args.seed}.pdf')
 
     H = args.input_size // args.patch_size
     W = H
@@ -146,56 +151,89 @@ def main():
     # -- Load image --------------------------------------------------------
     image = load_image(args.image_path, args.input_size)
 
-    # -- Instantiate MaskCollator ------------------------------------------
-    collator = MaskCollator(
-        input_size=(args.input_size, args.input_size),
-        patch_size=ps,
-        enc_mask_scale=tuple(args.enc_mask_scale),
-        pred_mask_scale=tuple(args.pred_mask_scale),
-        aspect_ratio=tuple(args.aspect_ratio),
-        nenc=1,
-        npred=args.npred,
-        min_keep=args.min_keep,
-        allow_overlap=False,
-        color_noise_path=args.noise_path,
-        color_mask_ratio=args.color_mask_ratio,
-    )
-
-    # -- Seed and sample block sizes ---------------------------------------
+    # -- Seed ---------------------------------------------------------------
     torch.manual_seed(args.seed)
     g = torch.Generator()
     g.manual_seed(args.seed)
 
-    p_size = collator._sample_block_size(
-        generator=g,
-        scale=collator.pred_mask_scale,
-        aspect_ratio_scale=collator.aspect_ratio,
-    )
-    e_size = collator._sample_block_size(
-        generator=g,
-        scale=collator.enc_mask_scale,
-        aspect_ratio_scale=(1.0, 1.0),
-    )
-
-    # -- Extract noise grid ------------------------------------------------
-    noise_grid = collator._extract_noise_windows(1)[0].cpu()
-
-    # -- Sample 4 target masks ---------------------------------------------
-    target_masks = []
-    complements = []
-
-    for _ in range(args.npred):
-        mask_1d, mask_complement = collator._sample_noisy_block_mask(
-            p_size, noise_grid=noise_grid,
+    # -- Instantiate collator & sample masks --------------------------------
+    if args.mask_type == 'multinoise':
+        collator = MultinoiseCollator(
+            input_size=(args.input_size, args.input_size),
+            patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            nenc=1,
+            npred=args.npred,
+            min_keep=args.min_keep,
+            allow_overlap=False,
+            color_noise_path=args.noise_path,
+            color_mask_ratio=args.color_mask_ratio,
         )
-        target_masks.append(_indices_to_2d(mask_1d, H, W))
-        complements.append(mask_complement)
 
-    # -- Sample 1 context mask (constrained) -------------------------------
-    ctx_1d, _ = collator._sample_noisy_block_mask(
-        e_size, noise_grid=noise_grid, acceptable_regions=complements,
-    )
-    ctx_mask = _indices_to_2d(ctx_1d, H, W)
+        p_size = collator._sample_block_size(
+            generator=g,
+            scale=collator.pred_mask_scale,
+            aspect_ratio_scale=collator.aspect_ratio,
+        )
+        e_size = collator._sample_block_size(
+            generator=g,
+            scale=collator.enc_mask_scale,
+            aspect_ratio_scale=(1.0, 1.0),
+        )
+
+        noise_grid = collator._extract_noise_windows(1)[0].cpu()
+
+        target_masks = []
+        complements = []
+        for _ in range(args.npred):
+            mask_1d, mask_complement = collator._sample_noisy_block_mask(
+                p_size, noise_grid=noise_grid,
+            )
+            target_masks.append(_indices_to_2d(mask_1d, H, W))
+            complements.append(mask_complement)
+
+        ctx_1d, _ = collator._sample_noisy_block_mask(
+            e_size, noise_grid=noise_grid, acceptable_regions=complements,
+        )
+        ctx_mask = _indices_to_2d(ctx_1d, H, W)
+
+    else:  # multiblock
+        collator = MultiblockCollator(
+            input_size=(args.input_size, args.input_size),
+            patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            nenc=1,
+            npred=args.npred,
+            min_keep=args.min_keep,
+            allow_overlap=False,
+        )
+
+        p_size = collator._sample_block_size(
+            generator=g,
+            scale=collator.pred_mask_scale,
+            aspect_ratio_scale=collator.aspect_ratio,
+        )
+        e_size = collator._sample_block_size(
+            generator=g,
+            scale=collator.enc_mask_scale,
+            aspect_ratio_scale=(1.0, 1.0),
+        )
+
+        target_masks = []
+        complements = []
+        for _ in range(args.npred):
+            mask_1d, mask_complement = collator._sample_block_mask(p_size)
+            target_masks.append(_indices_to_2d(mask_1d, H, W))
+            complements.append(mask_complement)
+
+        ctx_1d, _ = collator._sample_block_mask(
+            e_size, acceptable_regions=complements,
+        )
+        ctx_mask = _indices_to_2d(ctx_1d, H, W)
 
     # =====================================================================
     # Draw figure: 6 panels
