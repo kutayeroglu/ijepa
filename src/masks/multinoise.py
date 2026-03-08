@@ -109,9 +109,7 @@ class MaskCollator(object):
         except Exception as e:
             raise Exception(f"Color Noise patterns not found at {data_path}. Error: {e}")
             
-        self.image_tensor = image_tensor
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.image_tensor = self.image_tensor.to(self.device)
+        self.image_tensor = image_tensor.float()
 
     def _extract_noise_windows(self, B: int) -> torch.Tensor:
         """
@@ -245,6 +243,9 @@ class MaskCollator(object):
                     mask[drop_coords_2d[:, 0], drop_coords_2d[:, 1]] = 0
             # --- 
             
+            # Capture 2D mask after noise thresholding for accurate complement
+            mask_2d = mask.clone()
+
             # -- Constrain mask to a set of acceptable regions
             if acceptable_regions is not None:
                 constrain_mask(mask, tries)
@@ -261,14 +262,10 @@ class MaskCollator(object):
                     )
         mask = mask.squeeze()
         # --
-        # Create complement mask (2D, not flattened)
-        # mask_complement stays 2D because it's used for spatial constraints:
-        # - It becomes part of acceptable_regions
-        # - Used in element-wise multiplication with 2D masks in constrain_mask
-        # - The spatial structure (height × width) is needed for constraint logic
-        # NOTE: mask is 1D indices (for indexing), but mask_complement is 2D (for spatial ops)
-        mask_complement = torch.ones((self.height, self.width), dtype=torch.int32)
-        mask_complement[top : top + h, left : left + w] = 0
+        # Complement from the actual noise-thresholded mask (2D) rather than
+        # the full rectangle. This way acceptable_regions only excludes patches
+        # that are truly prediction targets, not ones removed by noise.
+        mask_complement = 1 - mask_2d
         # --
         if log_detail:
             top_val = top.item() if top.dim() > 0 else int(top)
