@@ -15,7 +15,7 @@ data:
   # train_fraction: 1.0
 logging:
   folder: /mnt/logs/ijepa/pretraining
-  write_tag: balon_mnoise_vitb
+  write_tag: balon_mnoise_noratio_vitb
 mask:
   allow_overlap: false
   aspect_ratio:
@@ -33,7 +33,7 @@ mask:
   - 0.2
   green_noise_data_path: /mnt/green_noise_data_3072.npz
   mask_type: multinoise
-  color_mask_ratio: 0.05
+  color_mask_ratio: 0.0
 meta:
   copy_data: false
   load_checkpoint: false

@@ -15,7 +15,7 @@ data:
   # train_fraction: 1.0
 logging:
   folder: /mnt/logs/ijepa/pretraining
-  write_tag: balon_mnoise_vitb
+  write_tag: balon_mnoise_v2_vitb
 mask:
   allow_overlap: false
   aspect_ratio:
@@ -33,7 +33,7 @@ mask:
   - 0.2
   green_noise_data_path: /mnt/green_noise_data_3072.npz
   mask_type: multinoise
-  color_mask_ratio: 0.05
+  color_mask_ratio: 0.03
 meta:
   copy_data: false
   load_checkpoint: false
@@ -51,6 +51,6 @@ optimization:
   final_weight_decay: 0.4
   ipe_scale: 1.0
   lr: 2.5e-04
-  start_lr: 2.5e-05
+  start_lr: 5.0e-05
   warmup: 15
   weight_decay: 0.04

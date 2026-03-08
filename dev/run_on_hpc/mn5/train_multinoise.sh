@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=balnoise
-#SBATCH --qos=acc_debug
+#SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91 
-#SBATCH --time=02:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
@@ -23,7 +23,7 @@ REAL_LOG_PATH="$SCRATCH_DIR/logs"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
 GREEN_NOISE_HOST_PATH="/gpfs/projects/etur91/boga222803/datasets/green_noise_data_3072.npz"
 
-mkdir -p "$REAL_LOG_PATH/green_mask/pretraining"
+mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
 mkdir -p "$LOCAL_DATA_DIR/train"
 
 # --- Data Staging (The bottleneck) ---

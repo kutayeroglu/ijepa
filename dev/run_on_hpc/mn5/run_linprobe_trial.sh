@@ -70,7 +70,7 @@ MODEL_PATH="/mnt/logs/ijepa/pretraining/balon_mnoise_vitb-ep80.pth.tar"
 module purge
 module load singularity/4.1.5
 
-echo "--- Executing Linear Probe (Trial: 10% data, 5 epochs) ---"
+echo "--- Executing Linear Probe Trial, 5 epochs) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
     "$SIF_IMAGE" \
@@ -84,7 +84,7 @@ singularity exec --nv \
         --learning_rate 0.00625 \
         --weight_decay 0.0005 \
         --num_workers 18 \
-        --train_frac  .1 \
+        --train_frac 1.0 \
         --num_epochs 5 \
         ${EXTRA_ARGS}
 
