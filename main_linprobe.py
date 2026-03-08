@@ -1,3 +1,31 @@
+"""Linear probe training for I-JEPA ViT encoders.
+
+Usage examples:
+
+    # ViT-Huge (default)
+    python main_linprobe.py \
+        --model_path path/to/checkpoint.pth.tar
+
+    # ViT-Base
+    python main_linprobe.py \
+        --model_name vit_base \
+        --patch_size 16 \
+        --model_path path/to/vit_base.pth.tar
+
+    # ViT-Small
+    python main_linprobe.py \
+        --model_name vit_small \
+        --patch_size 16 \
+        --model_path path/to/vit_small.pth.tar
+
+    # With additional options
+    python main_linprobe.py \
+        --model_name vit_base \
+        --patch_size 16 \
+        --model_path path/to/checkpoint.pth.tar \
+        --dataset_dir ~/datasets \
+        --batch_size 128
+"""
 import argparse
 import logging
 import os
@@ -6,7 +34,8 @@ from collections import OrderedDict
 
 import torch
 
-from src.models.vision_transformer import vit_huge
+import src.models.vision_transformer as vit
+from src.models.vision_transformer import VIT_EMBED_DIMS
 from src.models.vit_linear_probe import LinearProbeModel
 from src.datasets.singleGPU_imagenet1k import get_imagenet_dataloaders
 from src.utils.linprobe_trainer import train_linear_probe
@@ -14,7 +43,7 @@ from src.utils.linprobe_trainer import train_linear_probe
 
 # --- SETUP OUTPUT DIRECTORY AND LOGGING ---
 project_name = "ijepa"
-run_name = f"linprobe_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
+run_name = f"lprobe_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
 
 # Create unique run directory
 outputs_dir = os.path.join(os.path.expanduser("~"), "outputs", project_name, run_name)
@@ -106,6 +135,32 @@ if __name__ == "__main__":
         default=None,
         help="Path to checkpoint file (default: uses pretrained_models/IN1K-vit.h.14-300e.pth.tar)",
     )
+    parser.add_argument(
+        "--model_name",
+        type=str,
+        default="vit_huge",
+        choices=["vit_tiny", "vit_small", "vit_base", "vit_large", "vit_huge", "vit_giant"],
+        help="ViT model architecture (default: vit_huge)",
+    )
+    parser.add_argument(
+        "--patch_size",
+        type=int,
+        default=14,
+        help="Patch size (default: 14 for vit.h.14, use 16 for vit.b/s/l/g)",
+    )
+    parser.add_argument(
+        "--img_size",
+        type=int,
+        default=224,
+        help="Input image size (default: 224)",
+    )
+    parser.add_argument(
+        "--encoder_key",
+        type=str,
+        default="target_encoder",
+        choices=["encoder", "target_encoder"],
+        help="Checkpoint key for encoder weights (default: target_encoder)",
+    )
 
     args = parser.parse_args()
     logger.info(f"All arguments: {vars(args)}")
@@ -139,39 +194,47 @@ if __name__ == "__main__":
         logger.exception(f"Error loading the model from {model_path}: {e}")
         raise
 
-    # NOTE: which one to use from checkpoint: encoder or target_encoder?? why?
-    encoder = checkpoint["target_encoder"]
+    encoder_state = checkpoint.get(args.encoder_key)
+    if encoder_state is None:
+        raise KeyError(
+            f"Checkpoint missing key '{args.encoder_key}'. "
+            f"Available keys: {list(checkpoint.keys())}"
+        )
 
     # Clean state dict keys
     new_state_dict = OrderedDict()
-    for k, v in encoder.items():
+    for k, v in encoder_state.items():
         name = k.replace("module.", "")
         new_state_dict[name] = v
 
-    # Load state dict
-    vit_h_encoder = vit_huge(
-        patch_size=14,
-        img_size=[224],
+    # Build encoder dynamically
+    model_builder = vit.__dict__[args.model_name]
+    encoder = model_builder(
+        patch_size=args.patch_size,
+        img_size=[args.img_size],
     )
-    vit_h_encoder.load_state_dict(new_state_dict)
+    encoder.load_state_dict(new_state_dict)
 
     # Freeze weights
-    for param in vit_h_encoder.parameters():
+    for param in encoder.parameters():
         param.requires_grad = False
-    vit_h_encoder.eval()
+    encoder.eval()
+
+    embed_dim = VIT_EMBED_DIMS[args.model_name]
 
     # Create model with linear head
     model = LinearProbeModel(
-        encoder=vit_h_encoder,
-        embed_dim=1280,
+        encoder=encoder,
+        embed_dim=embed_dim,
         num_classes=1000,
     )
 
     logger.info(
-        f"Model config: patch_size={vit_h_encoder.patch_embed.patch_size}, "
-        f"img_size={vit_h_encoder.patch_embed.img_size}, "
+        f"Model config: model_name={args.model_name}, "
+        f"patch_size={encoder.patch_embed.patch_size}, "
+        f"img_size={encoder.patch_embed.img_size}, "
         f"embed_dim={model.classifier.in_features}, "
-        f"num_classes={model.classifier.out_features}, encoder_key=target_encoder"
+        f"num_classes={model.classifier.out_features}, encoder_key={args.encoder_key}"
     )
 
     # Get dataloaders
