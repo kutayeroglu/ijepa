@@ -33,7 +33,7 @@ mask:
   - 0.2
   green_noise_data_path: /mnt/green_noise_data_3072.npz
   mask_type: multinoise
-  color_mask_ratio: 0.03
+  color_mask_ratio: 0.55
 meta:
   copy_data: false
   load_checkpoint: false

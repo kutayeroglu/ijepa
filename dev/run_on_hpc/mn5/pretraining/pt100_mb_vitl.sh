@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=pt_mbVitL_%j.out
-#SBATCH --error=pt_mbVitL_%j.err
+#SBATCH --output=%j_pt_mbVitL.out
+#SBATCH --error=%j_pt_mbVitL.err
 #SBATCH --chdir=.
 
 set -e
@@ -21,8 +21,19 @@ SCRATCH_DIR="/gpfs/scratch/etur91"
 REAL_DATA_PATH="/gpfs/projects/etur91/boga222803/datasets/imagenet"
 REAL_LOG_PATH="$SCRATCH_DIR/logs"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
+SCRIPT_PATH="dev/run_on_hpc/mn5/pretraining/pt100_mb_vitl.sh"
+CONFIG_PATH="configs/balon_mblock_vitl.yaml"
+RUN_TAG="balon_mblock_vitl"
+RUN_ID="${SLURM_JOB_ID:-manual}_${RUN_TAG}"
+RUN_OUTPUT_DIR="$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG/runs/$RUN_ID"
+export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
+export IJEPA_RUN_ID="$RUN_ID"
+
+source "$HOME/ijepa/dev/run_on_hpc/mn5/common.sh"
 
 mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
+mkdir -p "$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG"
+mkdir -p "$RUN_OUTPUT_DIR"
 mkdir -p "$LOCAL_DATA_DIR/train"
 
 # --- Data Staging (The bottleneck) ---
@@ -51,13 +62,14 @@ BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
 SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
 
 CMD_ARGS=(
-    --fname configs/balon_mblock_vitl.yaml
+    --fname "$CONFIG_PATH"
     --devices cuda:0 cuda:1 cuda:2 cuda:3
 )
 
 module purge
 module load singularity/4.1.5
 
+print_run_header
 echo "--- Executing I-JEPA (multiblock, vit-large) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \

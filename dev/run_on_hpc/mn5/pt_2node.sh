@@ -7,8 +7,8 @@
 #SBATCH --ntasks-per-node=4
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:4
-#SBATCH --output=aw_mnoise_2n_%j.out
-#SBATCH --error=aw_mnoise_2n_%j.err
+#SBATCH --output=%j_aw_mnoise_2n.out
+#SBATCH --error=%j_aw_mnoise_2n.err
 #SBATCH --chdir=.
 
 set -e

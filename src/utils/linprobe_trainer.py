@@ -1,3 +1,4 @@
+import csv
 import os
 import logging
 
@@ -24,6 +25,23 @@ def train_linear_probe(
 ):
     """Training loop"""
     logger.info("Starting linear probe training")
+    metrics_path = os.path.join(outputs_dir, "metrics.csv")
+    best_checkpoint_path = os.path.join(outputs_dir, "best_linear_probe.pth")
+    plot_path = os.path.join(outputs_dir, "training_loss_plot.png")
+
+    with open(metrics_path, "w", newline="") as metrics_handle:
+        writer = csv.writer(metrics_handle)
+        writer.writerow(
+            [
+                "epoch",
+                "train_loss",
+                "val_loss",
+                "train_acc",
+                "val_acc",
+                "lr",
+                "best_val_acc_so_far",
+            ]
+        )
 
     # Mode configuration
     model.encoder.eval()
@@ -57,6 +75,7 @@ def train_linear_probe(
     for epoch in range(num_epochs):
         model.classifier.train()  # Train only the classifier head
         train_loss, train_correct, train_total = 0.0, 0, 0
+        current_lr = optimizer.param_groups[0]["lr"]
 
         train_pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Train]")
         for batch_idx, (images, labels) in enumerate(train_pbar):
@@ -121,26 +140,38 @@ def train_linear_probe(
         logger.info(
             f"Epoch {epoch + 1}/{num_epochs} | "
             f"Train Acc: {train_acc:.2f}% | Val Acc: {val_acc:.2f}% | "
-            f"LR: {scheduler.get_last_lr()[0]:.6f}"
+            f"LR: {current_lr:.6f}"
         )
 
         # Save best model
         if val_acc > best_acc:
             logger.info(f"New best model! ({val_acc:.2f}% > {best_acc:.2f}%)")
             best_acc = val_acc
-            checkpoint_path = os.path.join(outputs_dir, "best_linear_probe.pth")
             torch.save(
                 {
                     "classifier": model.classifier.state_dict(),
                     "epoch": epoch + 1,
                     "val_acc": val_acc,
                 },
-                checkpoint_path,
+                best_checkpoint_path,
+            )
+
+        with open(metrics_path, "a", newline="") as metrics_handle:
+            writer = csv.writer(metrics_handle)
+            writer.writerow(
+                [
+                    epoch + 1,
+                    f"{train_losses[-1]:.6f}",
+                    f"{val_losses[-1]:.6f}",
+                    f"{train_acc:.4f}",
+                    f"{val_acc:.4f}",
+                    f"{current_lr:.8f}",
+                    f"{best_acc:.4f}",
+                ]
             )
 
     logger.info(f"Training complete. Best validation accuracy: {best_acc:.2f}%")
 
-    plot_path = os.path.join(outputs_dir, "training_loss_plot.png")
     plot_loss_curves(
         train_losses,
         val_losses,
@@ -148,4 +179,9 @@ def train_linear_probe(
         save_path=plot_path,
     )
 
-    return best_acc
+    return {
+        "best_acc": best_acc,
+        "best_checkpoint_path": best_checkpoint_path,
+        "metrics_path": metrics_path,
+        "plot_path": plot_path,
+    }

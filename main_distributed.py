@@ -64,6 +64,14 @@ class Trainer:
             pp = pprint.PrettyPrinter(indent=4)
             pp.pprint(params)
 
+        params.setdefault('_tracking', {})
+        params['_tracking'].update(
+            {
+                'config_path': os.path.abspath(fname),
+                'launcher': 'main_distributed.py',
+            }
+        )
+
         resume_preempt = False if load_model is None else load_model
         app_main(args=params, resume_preempt=resume_preempt)
 

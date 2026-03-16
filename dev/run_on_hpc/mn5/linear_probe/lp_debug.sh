@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
-#SBATCH --output=model-agnostic_probe_%j.out
-#SBATCH --error=model-agnostic_probe_%j.err
+#SBATCH --output=%j_model-agnostic_probe.out
+#SBATCH --error=%j_model-agnostic_probe.err
 #SBATCH --chdir=.
 
 set -e
@@ -20,8 +20,18 @@ SCRATCH_DIR="/gpfs/scratch/etur91"
 REAL_DATA_PATH="/gpfs/projects/etur91/boga222803/datasets/imagenet"
 REAL_LOG_PATH="$SCRATCH_DIR/logs"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
+SCRIPT_PATH="dev/run_on_hpc/mn5/linear_probe/lp_debug.sh"
+RUN_ID="${SLURM_JOB_ID:-manual}_lp_debug"
+SOURCE_CHECKPOINT_TAG="balon_mnoise_vitb"
+RUN_OUTPUT_DIR="$REAL_LOG_PATH/ijepa/linprobe/$SOURCE_CHECKPOINT_TAG/runs/$RUN_ID"
+MODEL_PATH="/mnt/logs/ijepa/pretraining/balon_mnoise_vitb/balon_mnoise_vitb-ep80.pth.tar"
+export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
+
+source "$HOME/ijepa/dev/run_on_hpc/mn5/common.sh"
 
 mkdir -p "$REAL_LOG_PATH/ijepa/linprobe"
+mkdir -p "$REAL_LOG_PATH/ijepa/linprobe/$SOURCE_CHECKPOINT_TAG"
+mkdir -p "$RUN_OUTPUT_DIR"
 mkdir -p "$LOCAL_DATA_DIR/train"
 mkdir -p "$LOCAL_DATA_DIR/val"
 
@@ -64,12 +74,10 @@ ls -d "$LOCAL_DATA_DIR/val"/*/ | wc -l
 BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
 SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
 
-# TODO: replace with the actual checkpoint path under /gpfs/scratch/etur91/logs/
-MODEL_PATH="/mnt/logs/ijepa/pretraining/balon_mnoise_vitb-ep80.pth.tar"
-
 module purge
 module load singularity/4.1.5
 
+print_run_header
 echo "--- Executing Linear Probe Trial, 5 epochs) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
@@ -86,6 +94,8 @@ singularity exec --nv \
         --num_workers 18 \
         --train_frac 1.0 \
         --num_epochs 5 \
+        --output_root /mnt/logs/ijepa/linprobe \
+        --run_id "$RUN_ID" \
         ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"

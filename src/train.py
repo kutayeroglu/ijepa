@@ -34,6 +34,13 @@ from src.masks.multinoise import MaskCollator as NoiseMaskCollator
 from src.masks.utils import apply_masks
 from src.utils.distributed import init_distributed, AllReduce
 from src.utils.logging import CSVLogger, gpu_timer, grad_logger, AverageMeter
+from src.utils.run_tracking import (
+    build_run_id,
+    ensure_dir,
+    get_runtime_context,
+    timestamp_utc,
+    write_json,
+)
 from src.utils.tensors import repeat_interleave_batch
 from src.datasets.imagenet1k import make_imagenet1k
 
@@ -121,13 +128,31 @@ def main(args, resume_preempt=False):
     final_lr = args["optimization"]["final_lr"]
 
     # -- LOGGING
-    folder = args["logging"]["folder"]
+    logging_root = args["logging"]["folder"]
     tag = args["logging"]["write_tag"]
-
-    dump = os.path.join(folder, "params-ijepa.yaml")
-    os.makedirs(folder, exist_ok=True)
-    with open(dump, "w") as f:
-        yaml.dump(args, f)
+    tracking_info = args.setdefault("_tracking", {})
+    experiment_dir = ensure_dir(os.path.join(logging_root, tag))
+    runs_root = ensure_dir(os.path.join(experiment_dir, "runs"))
+    run_id = (
+        tracking_info.get("run_id")
+        or os.environ.get("IJEPA_RUN_ID")
+        or build_run_id(tag)
+    )
+    run_dir = ensure_dir(os.path.join(runs_root, run_id))
+    params_path = os.path.join(run_dir, "params-ijepa.yaml")
+    manifest_path = os.path.join(run_dir, "run_manifest.json")
+    run_started_at = timestamp_utc()
+    tracking_info.update(
+        {
+            "task_type": "pretraining",
+            "experiment_tag": tag,
+            "run_id": run_id,
+            "output_dir": run_dir,
+            "logging_root": logging_root,
+            "experiment_dir": experiment_dir,
+            "runs_root": runs_root,
+        }
+    )
     # ----------------------------------------------------------------------- #
 
     try:
@@ -140,6 +165,95 @@ def main(args, resume_preempt=False):
     logger.info(f"Initialized (rank/world-size) {rank}/{world_size}")
     if rank > 0:
         logger.setLevel(logging.ERROR)
+
+    runtime_context = get_runtime_context()
+    csv_log_path = os.path.join(run_dir, f"{tag}_r{rank}.csv")
+    run_latest_path = os.path.join(run_dir, f"{tag}-latest.pth.tar")
+    experiment_latest_path = os.path.join(experiment_dir, f"{tag}-latest.pth.tar")
+    latest_run_info_path = os.path.join(experiment_dir, "latest_run.json")
+    save_path = os.path.join(run_dir, tag + "-ep{epoch}.pth.tar")
+
+    def resolve_load_path():
+        if r_file is None:
+            return experiment_latest_path
+        if os.path.isabs(r_file):
+            return r_file
+
+        candidates = [
+            os.path.join(run_dir, r_file),
+            os.path.join(experiment_dir, r_file),
+            os.path.join(logging_root, r_file),
+        ]
+        for candidate in candidates:
+            if os.path.exists(candidate):
+                return candidate
+        return candidates[0]
+
+    load_path = resolve_load_path() if load_model else None
+
+    def write_latest_run_info(status, extra=None):
+        payload = {
+            "task_type": "pretraining",
+            "status": status,
+            "experiment_tag": tag,
+            "run_id": run_id,
+            "experiment_dir": experiment_dir,
+            "output_dir": run_dir,
+            "run_manifest_path": manifest_path,
+            "run_latest_checkpoint_path": run_latest_path,
+            "latest_checkpoint_path": experiment_latest_path,
+            "updated_at": timestamp_utc(),
+        }
+        payload.update(runtime_context)
+        if extra:
+            payload.update(extra)
+        write_json(
+            latest_run_info_path,
+            {key: value for key, value in payload.items() if value not in (None, "")},
+        )
+
+    def write_run_manifest(status, extra=None):
+        payload = {
+            "task_type": "pretraining",
+            "status": status,
+            "run_id": run_id,
+            "experiment_tag": tag,
+            "run_tag": tag,
+            "output_dir": run_dir,
+            "logging_root": logging_root,
+            "experiment_dir": experiment_dir,
+            "runs_root": runs_root,
+            "config_path": tracking_info.get("config_path"),
+            "launcher": tracking_info.get("launcher"),
+            "params_path": params_path,
+            "csv_log_path_rank0": os.path.join(run_dir, f"{tag}_r0.csv"),
+            "run_latest_checkpoint_path": run_latest_path,
+            "latest_checkpoint_path": experiment_latest_path,
+            "latest_run_info_path": latest_run_info_path,
+            "checkpoint_pattern": os.path.join(run_dir, f"{tag}-ep{{epoch}}.pth.tar"),
+            "load_path": load_path,
+            "resume_preempt": resume_preempt,
+            "model_name": model_name,
+            "mask_type": mask_type,
+            "batch_size": batch_size,
+            "num_epochs": num_epochs,
+            "train_fraction": train_fraction,
+            "world_size": world_size,
+            "started_at": run_started_at,
+        }
+        payload.update(runtime_context)
+        if extra:
+            payload.update(extra)
+        write_json(
+            manifest_path,
+            {key: value for key, value in payload.items() if value not in (None, "")},
+        )
+
+    if rank == 0:
+        with open(params_path, "w") as f:
+            yaml.dump(args, f)
+        write_run_manifest("running")
+        write_latest_run_info("running")
 
     # Log GPU memory status after distributed init
     if torch.cuda.is_available() and rank == 0:
@@ -170,17 +284,9 @@ def main(args, resume_preempt=False):
                 "This is unusual for SLURM jobs. Check nvidia-smi output above."
             )
 
-    # -- log/checkpointing paths
-    log_file = os.path.join(folder, f"{tag}_r{rank}.csv")
-    save_path = os.path.join(folder, f"{tag}" + "-ep{epoch}.pth.tar")
-    latest_path = os.path.join(folder, f"{tag}-latest.pth.tar")
-    load_path = None
-    if load_model:
-        load_path = os.path.join(folder, r_file) if r_file is not None else latest_path
-
     # -- make csv_logger
     csv_logger = CSVLogger(
-        log_file,
+        csv_log_path,
         ("%d", "epoch"),
         ("%d", "itr"),
         ("%.5f", "loss"),
@@ -354,7 +460,8 @@ def main(args, resume_preempt=False):
             "lr": lr,
         }
         if rank == 0:
-            torch.save(save_dict, latest_path)
+            torch.save(save_dict, run_latest_path)
+            torch.save(save_dict, experiment_latest_path)
             if (epoch + 1) % checkpoint_freq == 0:
                 torch.save(save_dict, save_path.format(epoch=f"{epoch + 1}"))
 
@@ -507,6 +614,23 @@ def main(args, resume_preempt=False):
         # -- Save Checkpoint after every epoch
         logger.info("avg. loss %.3f" % loss_meter.avg)
         save_checkpoint(epoch + 1)
+
+    if rank == 0:
+        write_run_manifest(
+            "completed",
+            {
+                "completed_at": timestamp_utc(),
+                "epochs_completed": num_epochs,
+                "final_loss": loss_meter.avg,
+            },
+        )
+        write_latest_run_info(
+            "completed",
+            {
+                "completed_at": timestamp_utc(),
+                "final_loss": loss_meter.avg,
+            },
+        )
 
 
 if __name__ == "__main__":

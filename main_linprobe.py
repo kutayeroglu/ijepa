@@ -1,67 +1,30 @@
-"""Linear probe training for I-JEPA ViT encoders.
-
-Usage examples:
-
-    # ViT-Huge (default)
-    python main_linprobe.py \
-        --model_path path/to/checkpoint.pth.tar
-
-    # ViT-Base
-    python main_linprobe.py \
-        --model_name vit_base \
-        --patch_size 16 \
-        --model_path path/to/vit_base.pth.tar
-
-    # ViT-Small
-    python main_linprobe.py \
-        --model_name vit_small \
-        --patch_size 16 \
-        --model_path path/to/vit_small.pth.tar
-
-    # With additional options
-    python main_linprobe.py \
-        --model_name vit_base \
-        --patch_size 16 \
-        --model_path path/to/checkpoint.pth.tar \
-        --dataset_dir ~/datasets \
-        --batch_size 128
-"""
+"""Linear probe training for I-JEPA ViT encoders."""
 import argparse
 import logging
 import os
-from datetime import datetime
 from collections import OrderedDict
 
 import torch
 
 import src.models.vision_transformer as vit
-from src.models.vision_transformer import VIT_EMBED_DIMS
-from src.models.vit_linear_probe import LinearProbeModel
 from src.datasets.singleGPU_imagenet1k import get_imagenet_dataloaders
+from src.models.vit_linear_probe import LinearProbeModel
+from src.models.vision_transformer import VIT_EMBED_DIMS
 from src.utils.linprobe_trainer import train_linear_probe
-
-
-# --- SETUP OUTPUT DIRECTORY AND LOGGING ---
-project_name = "ijepa"
-run_name = f"lprobe_{datetime.now().strftime('%Y-%m-%d_%H-%M-%S')}"
-
-# Create unique run directory
-outputs_dir = os.path.join(os.path.expanduser("~"), "outputs", project_name, run_name)
-os.makedirs(outputs_dir, exist_ok=True)
-
-# Setup logging
-log_file_path = os.path.join(outputs_dir, "training_log")
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(name)s:%(levelname)s] %(message)s",
-    handlers=[logging.FileHandler(log_file_path), logging.StreamHandler()],
+from src.utils.run_tracking import (
+    build_run_id,
+    checkpoint_stem,
+    ensure_dir,
+    get_runtime_context,
+    timestamp_utc,
+    write_json,
 )
+
 
 logger = logging.getLogger(__name__)
 
 
-if __name__ == "__main__":
-    # Parse command-line arguments
+def parse_args():
     parser = argparse.ArgumentParser(description="Linear probe training")
     parser.add_argument(
         "--dataset_dir",
@@ -161,45 +124,157 @@ if __name__ == "__main__":
         choices=["encoder", "target_encoder"],
         help="Checkpoint key for encoder weights (default: target_encoder)",
     )
+    parser.add_argument(
+        "--output_root",
+        type=str,
+        default=os.environ.get(
+            "IJEPA_LINPROBE_ROOT",
+            os.path.join("~", "outputs", "ijepa", "linprobe"),
+        ),
+        help="Root directory under which linear-probe run folders are created.",
+    )
+    parser.add_argument(
+        "--run_id",
+        type=str,
+        default=None,
+        help="Optional explicit run ID. Defaults to a timestamped name derived from the source checkpoint.",
+    )
+    return parser.parse_args()
 
-    args = parser.parse_args()
-    logger.info(f"All arguments: {vars(args)}")
 
-    # Params
+def configure_logging(outputs_dir):
+    log_file_path = os.path.join(outputs_dir, "training_log")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s [%(name)s:%(levelname)s] %(message)s",
+        handlers=[logging.FileHandler(log_file_path), logging.StreamHandler()],
+        force=True,
+    )
+    return log_file_path
+
+
+def default_model_path(script_dir, maybe_model_path):
+    if maybe_model_path:
+        return os.path.abspath(os.path.expanduser(maybe_model_path))
+
+    model_dir = os.path.join(script_dir, "pretrained_models")
+    model_file_name = "IN1K-vit.h.14-300e.pth.tar"
+    return os.path.join(model_dir, model_file_name)
+
+
+def build_outputs_dir(output_root, run_id, model_path):
+    output_root = os.path.abspath(os.path.expanduser(output_root))
+    source_checkpoint_tag = checkpoint_stem(model_path)
+    experiment_dir = ensure_dir(os.path.join(output_root, source_checkpoint_tag))
+    runs_root = ensure_dir(os.path.join(experiment_dir, "runs"))
+    resolved_run_id = run_id or build_run_id(f"lprobe_{source_checkpoint_tag}")
+    outputs_dir = ensure_dir(os.path.join(runs_root, resolved_run_id))
+    return (
+        output_root,
+        source_checkpoint_tag,
+        experiment_dir,
+        runs_root,
+        resolved_run_id,
+        outputs_dir,
+    )
+
+
+if __name__ == "__main__":
+    args = parse_args()
     script_dir = os.path.dirname(__file__)
-    if args.model_path:
-        model_path = os.path.expanduser(args.model_path)
-    else:
-        model_dir = os.path.join(script_dir, "pretrained_models")
-        model_file_name = "IN1K-vit.h.14-300e.pth.tar"
-        model_path = os.path.join(model_dir, model_file_name)
+    model_path = default_model_path(script_dir, args.model_path)
+    (
+        output_root,
+        source_checkpoint_tag,
+        experiment_dir,
+        runs_root,
+        run_id,
+        outputs_dir,
+    ) = build_outputs_dir(
+        args.output_root,
+        args.run_id,
+        model_path,
+    )
+    log_file_path = configure_logging(outputs_dir)
+    logger.info("All arguments: %s", vars(args))
 
     dataset_dir = os.path.expanduser(args.dataset_dir)
     val_dir = os.path.expanduser(args.val_dir) if args.val_dir else None
-    # Check if in1k subdirectory exists, otherwise use the dataset_dir directly
     in1k_dir = os.path.join(dataset_dir, "in1k")
     if not os.path.exists(in1k_dir):
         in1k_dir = dataset_dir
 
-    logger.info(f"Dataset directory: {dataset_dir}")
-    logger.info(f"Using data from: {in1k_dir}")
+    logger.info("Dataset directory: %s", dataset_dir)
+    logger.info("Using data from: %s", in1k_dir)
     if val_dir:
-        logger.info(f"Validation directory override: {val_dir}")
+        logger.info("Validation directory override: %s", val_dir)
+
+    manifest_path = os.path.join(outputs_dir, "run_manifest.json")
+    run_started_at = timestamp_utc()
+    runtime_context = get_runtime_context()
+
+    def write_run_manifest(status, extra=None):
+        payload = {
+            "task_type": "linear_probe",
+            "status": status,
+            "run_id": run_id,
+            "output_root": output_root,
+            "experiment_dir": experiment_dir,
+            "runs_root": runs_root,
+            "output_dir": outputs_dir,
+            "log_file_path": log_file_path,
+            "source_checkpoint_path": model_path,
+            "source_checkpoint_tag": source_checkpoint_tag,
+            "model_name": args.model_name,
+            "patch_size": args.patch_size,
+            "encoder_key": args.encoder_key,
+            "dataset_dir": dataset_dir,
+            "val_dir": val_dir,
+            "batch_size": args.batch_size,
+            "num_workers": args.num_workers,
+            "train_frac": args.train_frac,
+            "val_frac": args.val_frac,
+            "num_epochs": args.num_epochs,
+            "learning_rate": args.learning_rate,
+            "weight_decay": args.weight_decay,
+            "device": args.device,
+            "started_at": run_started_at,
+            "arguments": vars(args),
+        }
+        payload.update(runtime_context)
+        if extra:
+            payload.update(extra)
+        write_json(
+            manifest_path,
+            {key: value for key, value in payload.items() if value not in (None, "")},
+        )
+
+    write_run_manifest("running")
 
     # Read encoder
     try:
         checkpoint = torch.load(model_path, map_location="cpu")
-        logger.info(f"Loaded model successfully from: {model_path}")
-    except Exception as e:
-        logger.exception(f"Error loading the model from {model_path}: {e}")
+        logger.info("Loaded model successfully from: %s", model_path)
+    except Exception as error:
+        write_run_manifest(
+            "failed",
+            {"completed_at": timestamp_utc(), "error": str(error)},
+        )
+        logger.exception("Error loading the model from %s: %s", model_path, error)
         raise
 
     encoder_state = checkpoint.get(args.encoder_key)
     if encoder_state is None:
-        raise KeyError(
+        available_keys = list(checkpoint.keys())
+        error = (
             f"Checkpoint missing key '{args.encoder_key}'. "
-            f"Available keys: {list(checkpoint.keys())}"
+            f"Available keys: {available_keys}"
         )
+        write_run_manifest(
+            "failed",
+            {"completed_at": timestamp_utc(), "error": error},
+        )
+        raise KeyError(error)
 
     # Clean state dict keys
     new_state_dict = OrderedDict()
@@ -207,7 +282,6 @@ if __name__ == "__main__":
         name = k.replace("module.", "")
         new_state_dict[name] = v
 
-    # Build encoder dynamically
     model_builder = vit.__dict__[args.model_name]
     encoder = model_builder(
         patch_size=args.patch_size,
@@ -230,14 +304,16 @@ if __name__ == "__main__":
     )
 
     logger.info(
-        f"Model config: model_name={args.model_name}, "
-        f"patch_size={encoder.patch_embed.patch_size}, "
-        f"img_size={encoder.patch_embed.img_size}, "
-        f"embed_dim={model.classifier.in_features}, "
-        f"num_classes={model.classifier.out_features}, encoder_key={args.encoder_key}"
+        "Model config: model_name=%s, patch_size=%s, img_size=%s, embed_dim=%s, "
+        "num_classes=%s, encoder_key=%s",
+        args.model_name,
+        encoder.patch_embed.patch_size,
+        encoder.patch_embed.img_size,
+        model.classifier.in_features,
+        model.classifier.out_features,
+        args.encoder_key,
     )
 
-    # Get dataloaders
     train_loader, val_loader = get_imagenet_dataloaders(
         in1k_dir,
         batch_size=args.batch_size,
@@ -248,14 +324,31 @@ if __name__ == "__main__":
         val_labels_file=args.val_labels_file,
     )
 
-    # Train linear head on in1k-trainset
-    trained_model = train_linear_probe(
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        num_epochs=args.num_epochs,
-        learning_rate=args.learning_rate,
-        weight_decay=args.weight_decay,
-        device=args.device,
-        outputs_dir=outputs_dir,
+    try:
+        training_result = train_linear_probe(
+            model=model,
+            train_loader=train_loader,
+            val_loader=val_loader,
+            num_epochs=args.num_epochs,
+            learning_rate=args.learning_rate,
+            weight_decay=args.weight_decay,
+            device=args.device,
+            outputs_dir=outputs_dir,
+        )
+    except Exception as error:
+        write_run_manifest(
+            "failed",
+            {"completed_at": timestamp_utc(), "error": str(error)},
+        )
+        raise
+
+    write_run_manifest(
+        "completed",
+        {
+            "completed_at": timestamp_utc(),
+            "best_val_acc": training_result["best_acc"],
+            "best_checkpoint_path": training_result["best_checkpoint_path"],
+            "metrics_path": training_result["metrics_path"],
+            "plot_path": training_result["plot_path"],
+        },
     )

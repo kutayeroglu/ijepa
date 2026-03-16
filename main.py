@@ -6,6 +6,7 @@
 #
 
 import argparse
+import os
 
 import multiprocessing as mp
 
@@ -32,8 +33,6 @@ parser.add_argument(
 
 
 def process_main(rank, fname, world_size, devices, batch_size_override=None):
-    import os
-
     os.environ["CUDA_VISIBLE_DEVICES"] = str(devices[rank].split(":")[-1])
 
     import logging
@@ -60,6 +59,16 @@ def process_main(rank, fname, world_size, devices, batch_size_override=None):
 
         pp = pprint.PrettyPrinter(indent=4)
         pp.pprint(params)
+
+    params.setdefault("_tracking", {})
+    params["_tracking"].update(
+        {
+            "config_path": os.path.abspath(fname),
+            "launcher": "main.py",
+            "devices": devices,
+            "batch_size_override": batch_size_override,
+        }
+    )
 
     world_size, rank = init_distributed(rank_and_world_size=(rank, world_size))
     logger.info(f"Running... (rank: {rank}/{world_size})")

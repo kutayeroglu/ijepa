@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=balon_noise_noratio_%j.out
-#SBATCH --error=balon_noise_noratio_%j.err
+#SBATCH --output=%j_balon_noise_noratio.out
+#SBATCH --error=%j_balon_noise_noratio.err
 #SBATCH --chdir=.
 
 set -e
@@ -22,8 +22,19 @@ REAL_DATA_PATH="/gpfs/projects/etur91/boga222803/datasets/imagenet"
 REAL_LOG_PATH="$SCRATCH_DIR/logs"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
 GREEN_NOISE_HOST_PATH="/gpfs/projects/etur91/boga222803/datasets/green_noise_data_3072.npz"
+SCRIPT_PATH="dev/run_on_hpc/mn5/pretraining/pt100_mn00.sh"
+CONFIG_PATH="configs/balon_mnoise_noratio.yaml"
+RUN_TAG="balon_mnoise_noratio_vitb"
+RUN_ID="${SLURM_JOB_ID:-manual}_${RUN_TAG}"
+RUN_OUTPUT_DIR="$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG/runs/$RUN_ID"
+export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
+export IJEPA_RUN_ID="$RUN_ID"
+
+source "$HOME/ijepa/dev/run_on_hpc/mn5/common.sh"
 
 mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
+mkdir -p "$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG"
+mkdir -p "$RUN_OUTPUT_DIR"
 mkdir -p "$LOCAL_DATA_DIR/train"
 
 # --- Data Staging (The bottleneck) ---
@@ -51,13 +62,14 @@ BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs,$GREEN_NO
 SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
 
 CMD_ARGS=(
-    --fname configs/balon_mnoise_noratio.yaml
+    --fname "$CONFIG_PATH"
     --devices cuda:0 cuda:1 cuda:2 cuda:3
 )
 
 module purge
 module load singularity/4.1.5
 
+print_run_header
 echo "--- Executing I-JEPA (noise mask, color_mask_ratio=0.0) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
