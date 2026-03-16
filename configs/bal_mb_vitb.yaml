@@ -15,7 +15,7 @@ data:
   # train_fraction: 1.0
 logging:
   folder: /mnt/logs/ijepa/pretraining
-  write_tag: balon_mblock_vitb
+  write_tag: bal_mb_vitb
 mask:
   allow_overlap: false
   aspect_ratio:
