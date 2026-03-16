@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=lp_mn100
+#SBATCH --job-name=lp_mn60
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
-#SBATCH --output=lp_cr15_mn100_%j.out
-#SBATCH --error=lp_cr15_mn100_%j.err
+#SBATCH --output=lp100_mn60_ViTB_%j.out
+#SBATCH --error=lp100_mn60_ViTB_%j.err
 #SBATCH --chdir=.
 
 set -e
@@ -65,7 +65,7 @@ BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
 SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
 
 # TODO: replace with the actual checkpoint path under /gpfs/scratch/etur91/logs/
-MODEL_PATH="/mnt/logs/ijepa/pretraining/balon_mnoise_cmr015_vitb-latest.pth.tar"
+MODEL_PATH="/mnt/logs/ijepa/pretraining/balon_mnoise_cmr060_vitb-latest.pth.tar"
 
 module purge
 module load singularity/4.1.5
