@@ -85,6 +85,7 @@ singularity exec --nv \
         --weight_decay 0.0005 \
         --num_workers 10 \
         --train_frac 0.01 \
+        --num_epochs 100 \
         ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"

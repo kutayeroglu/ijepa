@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=siunoi
+#SBATCH --job-name=Lp1m50ViB
 #SBATCH --qos=acc_debug
 #SBATCH --account=etur91
 #SBATCH --time=02:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
-#SBATCH --output=siu1prc_mn_%j.out
-#SBATCH --error=siu1prc_mn_%j.err
+#SBATCH --output=lp1_mn50_VitB_%j.out
+#SBATCH --error=lp1_mn50_VitB_%j.err
 #SBATCH --chdir=.
 
 set -e
@@ -85,6 +85,7 @@ singularity exec --nv \
         --weight_decay 0.0005 \
         --num_workers 10 \
         --train_frac 0.01 \
+        --num_epochs 100 \
         ${EXTRA_ARGS}
 
 echo "--- Job Finished Successfully ---"
