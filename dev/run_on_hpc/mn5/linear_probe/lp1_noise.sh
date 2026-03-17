@@ -1,49 +1,55 @@
 #!/bin/bash
-#SBATCH --job-name=Lp1m50ViB
+#SBATCH --job-name=lp1mn50
 #SBATCH --qos=acc_debug
 #SBATCH --account=etur91
 #SBATCH --time=02:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
-#SBATCH --output=%j_lp1_mn50_VitB.out
-#SBATCH --error=%j_lp1_mn50_VitB.err
+#SBATCH --output=%j_lp1_mn50.out
+#SBATCH --error=%j_lp1_mn50.err
 #SBATCH --chdir=.
 
 set -e
-
-# --- Environment Setup ---
-cd "$HOME/ijepa"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
 
-SCRATCH_DIR="/gpfs/scratch/etur91"
-REAL_DATA_PATH="/gpfs/projects/etur91/boga222803/datasets/imagenet"
-REAL_LOG_PATH="$SCRATCH_DIR/logs"
-LOCAL_DATA_DIR="$TMPDIR/imagenet"
-SCRIPT_PATH="dev/run_on_hpc/mn5/linear_probe/lp1_noise.sh"
-RUN_ID="${SLURM_JOB_ID:-manual}_lp1_noise"
-SOURCE_CHECKPOINT_TAG="balon_mnoise_vitb"
-RUN_OUTPUT_DIR="$REAL_LOG_PATH/ijepa/linprobe/$SOURCE_CHECKPOINT_TAG/runs/$RUN_ID"
-MODEL_PATH="/mnt/logs/ijepa/pretraining/balon_mnoise_vitb/balon_mnoise_vitb-latest.pth.tar"
+# -- Script --
+PROJECT_ROOT="$HOME/ijepa"
+cd "$PROJECT_ROOT"
+PROJECTS_BASE="/gpfs/projects/etur91/boga222803"
+SCRIPT_PATH="$(realpath --relative-to="$PROJECT_ROOT" "$0")"
+source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
-source "$HOME/ijepa/dev/run_on_hpc/mn5/common.sh"
+# -- Config --
+# TODO: Set CONFIG_TAG to match pretraining config write_tag (e.g. bal_mn50_vitb, bal_mb_vitb)
+CONFIG_TAG="bal_mn50_vitb"
+# TODO: Set PRETRAINING_RUN_ID to the pretraining run to probe (e.g. 37915695_bal_mn50_vitb), or export before sbatch
+PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-REPLACE_WITH_PRETRAINING_RUN_ID}"
+RUN_ID="${SLURM_JOB_ID:-manual}_lp1_noise"
 
-mkdir -p "$REAL_LOG_PATH/ijepa/linprobe"
-mkdir -p "$REAL_LOG_PATH/ijepa/linprobe/$SOURCE_CHECKPOINT_TAG"
-mkdir -p "$RUN_OUTPUT_DIR"
+# -- Logs --
+SCRATCH_DIR="/gpfs/scratch/etur91"
+REAL_LOG_PATH="$SCRATCH_DIR/logs"
+
+# -- Data --
+REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
+LOCAL_DATA_DIR="$TMPDIR/imagenet"
+
+MODEL_PATH="$REAL_LOG_PATH/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-latest.pth.tar"
+CONTAINER_MODEL_PATH="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-latest.pth.tar"
+PRETRAINING_RUN_DIR="$(dirname "$MODEL_PATH")"
+OUTPUTS_DIR="$PRETRAINING_RUN_DIR/linprobe/$RUN_ID"
+CONTAINER_OUTPUTS_DIR="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/linprobe/$RUN_ID"
+RUN_OUTPUT_DIR="$OUTPUTS_DIR"
+
+mkdir -p "$OUTPUTS_DIR"
 mkdir -p "$LOCAL_DATA_DIR/train"
 mkdir -p "$LOCAL_DATA_DIR/val"
 
-# --- Data Staging (The bottleneck) ---
 echo "--- Staging and Extracting Data to Local SSD ($TMPDIR) ---"
-
-# Extract Main Train Tar
-echo "Extracting main train tar from GPFS..."
 tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_train.tar" --strip-components=1 -C "$LOCAL_DATA_DIR/train"
 
-# Extract class sub-tars in parallel
-echo "Extracting class sub-tars in parallel..."
 cd "$LOCAL_DATA_DIR/train"
 find . -name "*.tar" -print0 | xargs -0 -P 20 -I {} sh -c '
     dir="${1%.tar}"
@@ -53,26 +59,30 @@ find . -name "*.tar" -print0 | xargs -0 -P 20 -I {} sh -c '
 ' -- {}
 cd -
 
-# Extract Validation Tar
-echo "Extracting validation tar from GPFS..."
 tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_val.tar" --strip-components=1 -C "$LOCAL_DATA_DIR/val"
 
 echo "--- Data extraction complete ---"
 
-# --- Sanity Check ---
-echo "--- Sanity check: verifying dataset layout ---"
-echo "Train top-level dirs (first 5):"
-ls "$LOCAL_DATA_DIR/train" | head -5
-echo "Train top-level dir count:"
-ls -d "$LOCAL_DATA_DIR/train"/*/ | wc -l
-echo "Val top-level dirs (first 5):"
-ls "$LOCAL_DATA_DIR/val" | head -5
-echo "Val top-level dir count:"
-ls -d "$LOCAL_DATA_DIR/val"/*/ | wc -l
-
-# --- Container Execution ---
+# -- Container execution --
 BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
-SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
+SIF_IMAGE="$PROJECTS_BASE/ijepa-env.sif"
+
+CMD_ARGS=(
+    --dataset_dir /mnt/data/imagenet
+    --val_dir /mnt/data/imagenet/val
+    --model_path "$CONTAINER_MODEL_PATH"
+    --model_name vit_base
+    --patch_size 16
+    --batch_size 1024
+    --learning_rate 0.00625
+    --weight_decay 0.0005
+    --num_workers 10
+    --train_frac 0.01
+    --num_epochs 100
+    --outputs_dir "$CONTAINER_OUTPUTS_DIR"
+    --run_id "$RUN_ID"
+    ${EXTRA_ARGS}
+)
 
 module purge
 module load singularity/4.1.5
@@ -82,20 +92,6 @@ echo "--- Executing Linear Probe ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
     "$SIF_IMAGE" \
-    python main_linprobe.py \
-        --dataset_dir /mnt/data/imagenet \
-        --val_dir /mnt/data/imagenet/val \
-        --model_path "$MODEL_PATH" \
-        --model_name vit_base \
-        --patch_size 16 \
-        --batch_size 1024 \
-        --learning_rate 0.00625 \
-        --weight_decay 0.0005 \
-        --num_workers 10 \
-        --train_frac 0.01 \
-        --num_epochs 100 \
-        --output_root /mnt/logs/ijepa/linprobe \
-        --run_id "$RUN_ID" \
-        ${EXTRA_ARGS}
+    python main_linprobe.py "${CMD_ARGS[@]}"
 
 echo "--- Job Finished Successfully ---"

@@ -131,7 +131,13 @@ def parse_args():
             "IJEPA_LINPROBE_ROOT",
             os.path.join("~", "outputs", "ijepa", "linprobe"),
         ),
-        help="Root directory under which linear-probe run folders are created.",
+        help="Root directory under which linear-probe run folders are created (ignored when --outputs_dir is set).",
+    )
+    parser.add_argument(
+        "--outputs_dir",
+        type=str,
+        default=None,
+        help="Optional explicit output directory. When set, used directly instead of output_root/.../runs/run_id.",
     )
     parser.add_argument(
         "--run_id",
@@ -183,18 +189,27 @@ if __name__ == "__main__":
     args = parse_args()
     script_dir = os.path.dirname(__file__)
     model_path = default_model_path(script_dir, args.model_path)
-    (
-        output_root,
-        source_checkpoint_tag,
-        experiment_dir,
-        runs_root,
-        run_id,
-        outputs_dir,
-    ) = build_outputs_dir(
-        args.output_root,
-        args.run_id,
-        model_path,
-    )
+    source_checkpoint_tag = checkpoint_stem(model_path)
+
+    if args.outputs_dir:
+        outputs_dir = ensure_dir(os.path.abspath(os.path.expanduser(args.outputs_dir)))
+        run_id = args.run_id or os.path.basename(outputs_dir.rstrip(os.sep))
+        output_root = os.path.dirname(outputs_dir)
+        experiment_dir = output_root
+        runs_root = output_root
+    else:
+        (
+            output_root,
+            source_checkpoint_tag,
+            experiment_dir,
+            runs_root,
+            run_id,
+            outputs_dir,
+        ) = build_outputs_dir(
+            args.output_root,
+            args.run_id,
+            model_path,
+        )
     log_file_path = configure_logging(outputs_dir)
     logger.info("All arguments: %s", vars(args))
 
