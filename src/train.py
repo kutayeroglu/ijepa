@@ -114,6 +114,8 @@ def main(args, resume_preempt=False):
     mask_type = args["mask"].get("mask_type", "multiblock")  # mask type: "multiblock" or "multinoise"
     green_noise_data_path = args["mask"].get("green_noise_data_path", None)  # path to color noise patterns
     color_mask_ratio = args["mask"].get("color_mask_ratio", 0.15)
+    enc_drop_order = args["mask"].get("enc_drop_order", "lowest")
+    pred_drop_order = args["mask"].get("pred_drop_order", "lowest")
     # --
 
     # -- OPTIMIZATION
@@ -339,6 +341,8 @@ def main(args, resume_preempt=False):
             debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
             color_noise_path=green_noise_data_path,
             color_mask_ratio=color_mask_ratio,
+            enc_drop_order=enc_drop_order,
+            pred_drop_order=pred_drop_order,
         )
     else:
         mask_collator = MBMaskCollator(

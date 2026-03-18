@@ -117,7 +117,8 @@ def load_image(path: str, size: int) -> np.ndarray:
 
 def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
                    pred_mask_scale, aspect_ratio, npred, min_keep, seed,
-                   noise_path=None, color_mask_ratio=0.15):
+                   noise_path=None, color_mask_ratio=0.15,
+                   enc_drop_order="lowest", pred_drop_order="lowest"):
     """Sample context + target masks for a given mask type and seed.
 
     Returns ``(ctx_mask, target_masks)`` where *ctx_mask* is an ``[H, W]``
@@ -140,6 +141,8 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
             allow_overlap=False,
             color_noise_path=noise_path,
             color_mask_ratio=color_mask_ratio,
+            enc_drop_order=enc_drop_order,
+            pred_drop_order=pred_drop_order,
         )
         p_size = collator._sample_block_size(
             generator=g, scale=collator.pred_mask_scale,
@@ -155,12 +158,13 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
         target_masks, complements = [], []
         for _ in range(npred):
             m, mc = collator._sample_noisy_block_mask(
-                p_size, noise_grid=noise_grid)
+                p_size, noise_grid=noise_grid, drop_order=pred_drop_order)
             target_masks.append(_indices_to_2d(m, H, W))
             complements.append(mc)
 
         ctx_1d, _ = collator._sample_noisy_block_mask(
-            e_size, noise_grid=noise_grid, acceptable_regions=complements)
+            e_size, noise_grid=noise_grid, acceptable_regions=complements,
+            drop_order=enc_drop_order)
         ctx_mask = _indices_to_2d(ctx_1d, H, W)
 
     else:  # multiblock
@@ -223,6 +227,14 @@ def main():
     parser.add_argument('--color_mask_ratio', type=float, default=0.15,
                         help='Fraction of mask driven by color noise '
                              '(multinoise only)')
+    parser.add_argument('--enc_drop_order', type=str, default='lowest',
+                        choices=['lowest', 'highest'],
+                        help='Which noise-value patches to drop for context '
+                             '(multinoise only): lowest or highest')
+    parser.add_argument('--pred_drop_order', type=str, default='lowest',
+                        choices=['lowest', 'highest'],
+                        help='Which noise-value patches to drop for target '
+                             '(multinoise only): lowest or highest')
     parser.add_argument('--npred', type=int, default=4)
     parser.add_argument('--min_keep', type=int, default=10)
     parser.add_argument('--dpi', type=int, default=300)
@@ -246,6 +258,7 @@ def main():
         aspect_ratio=tuple(args.aspect_ratio),
         npred=args.npred, min_keep=args.min_keep, seed=args.seed,
         noise_path=args.noise_path, color_mask_ratio=args.color_mask_ratio,
+        enc_drop_order=args.enc_drop_order, pred_drop_order=args.pred_drop_order,
     )
 
     # -- Which methods to show ----------------------------------------------

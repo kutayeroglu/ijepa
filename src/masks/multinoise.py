@@ -49,7 +49,9 @@ class MaskCollator(object):
         allow_overlap=False,
         debug_log=False,
         color_noise_path="noise_colors/green/green_noise_data_3072.npz",
-        color_mask_ratio=0.15, # ratio of patches to drop from initially selected blocks 
+        color_mask_ratio=0.15, # ratio of patches to drop from initially selected blocks
+        enc_drop_order="lowest",  # "lowest" | "highest" - which noise-value patches to drop for context
+        pred_drop_order="lowest",  # "lowest" | "highest" - which noise-value patches to drop for target
     ):
         super(MaskCollator, self).__init__()
         if not isinstance(input_size, tuple):
@@ -83,6 +85,11 @@ class MaskCollator(object):
 
         # -- Color Noise Initialization
         self.color_mask_ratio = color_mask_ratio
+        for name, val in [("enc_drop_order", enc_drop_order), ("pred_drop_order", pred_drop_order)]:
+            if val not in ("lowest", "highest"):
+                raise ValueError(f"{name} must be 'lowest' or 'highest', got {val!r}")
+        self.enc_drop_order = enc_drop_order
+        self.pred_drop_order = pred_drop_order
         self.trans_sequence = transforms.Compose([
             transforms.RandomCrop(self.height), # Crop to [self.height, self.width] which is [14, 14] for ViT/14
             transforms.RandomHorizontalFlip(p=0.5),
@@ -182,7 +189,8 @@ class MaskCollator(object):
         b_size: tuple[int, int], 
         noise_grid: torch.Tensor, # shape: [self.height, self.width]
         acceptable_regions: list[torch.Tensor] | None = None, 
-        log_detail: bool = False
+        log_detail: bool = False,
+        drop_order: str = "lowest",
     ) -> tuple[torch.Tensor, torch.Tensor]:
         h, w = b_size  # block height and width (expressed in number of patches)
 
@@ -227,8 +235,9 @@ class MaskCollator(object):
                     # 2. Extract specifically the noise values for those patches
                     box_noise_values = noise_grid[box_indices_2d[:, 0], box_indices_2d[:, 1]]
                     
-                    # 3. Sort those noise values descending
-                    ids_shuffle = torch.argsort(box_noise_values, descending=True)
+                    # 3. Sort those noise values (descending=keep highest/drop lowest, ascending=keep lowest/drop highest)
+                    descending = (drop_order == "lowest")
+                    ids_shuffle = torch.argsort(box_noise_values, descending=descending)
                     
                     # 4. Calculate how many to keep
                     len_keep = int(total_in_box * (1 - self.color_mask_ratio))
@@ -323,7 +332,9 @@ class MaskCollator(object):
             
             masks_p, masks_C = [], []
             for _ in range(self.npred):
-                mask, mask_C = self._sample_noisy_block_mask(p_size, noise_grid=noise_grid, log_detail=log_detail)
+                mask, mask_C = self._sample_noisy_block_mask(
+                    p_size, noise_grid=noise_grid, log_detail=log_detail, drop_order=self.pred_drop_order
+                )
                 masks_p.append(mask)  # target block mask
                 masks_C.append(mask_C)  # target block complement mask
                 min_keep_pred = min(min_keep_pred, len(mask)) # track min size so all target masks can be truncated to the same length for batch collation
@@ -339,7 +350,8 @@ class MaskCollator(object):
             masks_e = []
             for _ in range(self.nenc):
                 mask, _ = self._sample_noisy_block_mask(
-                    e_size, noise_grid=noise_grid, acceptable_regions=acceptable_regions, log_detail=log_detail
+                    e_size, noise_grid=noise_grid, acceptable_regions=acceptable_regions,
+                    log_detail=log_detail, drop_order=self.enc_drop_order
                 )
                 masks_e.append(mask)
                 min_keep_enc = min(min_keep_enc, len(mask)) # track min size so all context masks can be truncated to the same length for batch collation
