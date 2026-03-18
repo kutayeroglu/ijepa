@@ -77,7 +77,7 @@ CMD_ARGS=(
     --learning_rate 0.00625
     --weight_decay 0.0005
     --num_workers 10
-    --num_epochs 50
+    --num_epochs 30
     --outputs_dir "$CONTAINER_OUTPUTS_DIR"
     --run_id "$RUN_ID"
     ${EXTRA_ARGS}
