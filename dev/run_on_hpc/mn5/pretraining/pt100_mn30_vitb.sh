@@ -1,38 +1,40 @@
 #!/bin/bash
-#SBATCH --job-name=cmr030
+#SBATCH --job-name=pt-mn30
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_cmr030.out
-#SBATCH --error=%j_cmr030.err
+#SBATCH --output=%j_pt100_mn30_vitb.out
+#SBATCH --error=%j_pt100_mn30_vitb.err
 #SBATCH --chdir=.
 
 set -e
-
-cd "$HOME/ijepa"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+cd "$HOME/ijepa"
 
-SCRATCH_DIR="/gpfs/scratch/etur91"
-REAL_DATA_PATH="/gpfs/projects/etur91/boga222803/datasets/imagenet"
-REAL_LOG_PATH="$SCRATCH_DIR/logs"
-LOCAL_DATA_DIR="$TMPDIR/imagenet"
-GREEN_NOISE_HOST_PATH="/gpfs/projects/etur91/boga222803/datasets/green_noise_data_3072.npz"
-SCRIPT_PATH="dev/run_on_hpc/mn5/pretraining/pt100_mn030.sh"
-CONFIG_PATH="configs/balon_mnoise_cmr030.yaml"
-RUN_TAG="balon_mnoise_cmr030_vitb"
-RUN_ID="${SLURM_JOB_ID:-manual}_${RUN_TAG}"
-RUN_OUTPUT_DIR="$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG/runs/$RUN_ID"
+# -- Script --
+PROJECT_ROOT="$HOME/ijepa"
+PROJECTS_BASE="/gpfs/projects/etur91/boga222803"
+SCRIPT_PATH="$(realpath --relative-to="$PROJECT_ROOT" "$0")"
+source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
-export IJEPA_RUN_ID="$RUN_ID"
 
-source "$HOME/ijepa/dev/run_on_hpc/mn5/common.sh"
+# -- Config --
+CONFIG_NAME="bal_mn30_vitb" # TODO
+CONFIG_PATH="configs/${CONFIG_NAME}.yaml"
 
-mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
-mkdir -p "$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG"
-mkdir -p "$RUN_OUTPUT_DIR"
+# -- Logs -- 
+SCRATCH_DIR="/gpfs/scratch/etur91"
+REAL_LOG_PATH="$SCRATCH_DIR/logs"
+
+# -- Data -- 
+NOISE_FILENAME="green_noise_data_3072.npz"
+NOISE_HOST_PATH="$PROJECTS_BASE/datasets/$NOISE_FILENAME"
+REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
+LOCAL_DATA_DIR="$TMPDIR/imagenet"
+
 mkdir -p "$LOCAL_DATA_DIR/train"
 
 echo "--- Staging and Extracting Data to Local SSD ($TMPDIR) ---"
@@ -49,8 +51,10 @@ cd -
 
 echo "--- Data extraction complete ---"
 
-BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs,$GREEN_NOISE_HOST_PATH:/mnt/green_noise_data_3072.npz"
-SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
+# -- Container execution --
+NOISE_CONTAINER_PATH="/mnt/$NOISE_FILENAME"
+BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs,$NOISE_HOST_PATH:$NOISE_CONTAINER_PATH"
+SIF_IMAGE="$PROJECTS_BASE/ijepa-env.sif"
 
 CMD_ARGS=(
     --fname "$CONFIG_PATH"

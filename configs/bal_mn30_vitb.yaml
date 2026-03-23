@@ -14,7 +14,7 @@ data:
   use_horizontal_flip: false
 logging:
   folder: /mnt/logs/ijepa/pretraining
-  write_tag: balon_mnoise_cmr030_vitb
+  write_tag: bal_mn30_vitb
 mask:
   allow_overlap: false
   aspect_ratio:

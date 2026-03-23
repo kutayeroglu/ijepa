@@ -14,7 +14,7 @@ data:
   use_horizontal_flip: false
 logging:
   folder: /mnt/logs/ijepa/pretraining
-  write_tag: balon_mnoise_cmr015_vitb
+  write_tag: bal_mn10_vitb
 mask:
   allow_overlap: false
   aspect_ratio:
@@ -32,7 +32,7 @@ mask:
   - 0.2
   green_noise_data_path: /mnt/green_noise_data_3072.npz
   mask_type: multinoise
-  color_mask_ratio: 0.15
+  color_mask_ratio: 0.1
 meta:
   copy_data: false
   load_checkpoint: false
