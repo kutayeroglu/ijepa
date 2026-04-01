@@ -60,6 +60,12 @@ Custom multiblock scales::
         --enc_mask_scale  0.85 1.0  \
         --aspect_ratio 0.75 1.5 \
         --seed 7
+
+Use Turkish labels in the output figure::
+
+    python visualization/visualize_masks.py \
+        --image_path photo.jpg \
+        --turkish
 """
 
 import argparse
@@ -81,6 +87,10 @@ from src.masks.multinoise import MaskCollator as MultinoiseCollator
 # ---------------------------------------------------------------------------
 
 DIM_ALPHA = 0.25
+TR_MASK_TYPE_LABELS = {
+    'multinoise': 'Çoklu Gürültü',
+    'multiblock': 'Çoklu Blok',
+}
 
 
 def _indices_to_2d(mask_1d: torch.Tensor, H: int, W: int) -> torch.Tensor:
@@ -115,9 +125,32 @@ def load_image(path: str, size: int) -> np.ndarray:
     return np.array(img)
 
 
+def localized_labels(turkish: bool):
+    """Return panel labels for the selected output language."""
+    if turkish:
+        return {
+            'original': 'Girdi',
+            'context': 'Bağlam',
+            'target_prefix': 'Hedef',
+        }
+    return {
+        'original': 'Original',
+        'context': 'Context',
+        'target_prefix': 'Target',
+    }
+
+
+def localized_mask_type_label(mask_type: str, turkish: bool) -> str:
+    """Return display label for the selected mask type."""
+    if turkish:
+        return TR_MASK_TYPE_LABELS.get(mask_type, mask_type)
+    return mask_type.capitalize()
+
+
 def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
                    pred_mask_scale, aspect_ratio, npred, min_keep, seed,
-                   noise_path=None, color_mask_ratio=0.15,
+                   noise_path='green_noise_data_3072.npz',
+                   color_mask_ratio=0.15,
                    enc_drop_order="lowest", pred_drop_order="lowest"):
     """Sample context + target masks for a given mask type and seed.
 
@@ -238,6 +271,9 @@ def main():
     parser.add_argument('--npred', type=int, default=4)
     parser.add_argument('--min_keep', type=int, default=10)
     parser.add_argument('--dpi', type=int, default=300)
+    parser.add_argument('--turkish', action='store_true',
+                        help='Use Turkish labels in panel titles '
+                             'and method names')
     args = parser.parse_args()
 
     # -- Output directory ---------------------------------------------------
@@ -272,16 +308,17 @@ def main():
                      for p in args.image_path]
 
     # -- Build rows: (row_label, panels) ------------------------------------
+    labels = localized_labels(args.turkish)
     rows = []
     for img_path, image in image_entries:
         for mt in mask_types:
             ctx_mask, target_masks = generate_masks(mt, **mask_kwargs)
 
-            panels = [('Original', image),
-                      ('Context', apply_patch_mask(image, ctx_mask, ps))]
+            panels = [(labels['original'], image),
+                      (labels['context'], apply_patch_mask(image, ctx_mask, ps))]
             for t in range(args.npred):
                 panels.append(
-                    (f'Target {t + 1}',
+                    (f"{labels['target_prefix']} {t + 1}",
                      apply_patch_mask(image, target_masks[t], ps)))
 
             rows.append((mt, panels))
@@ -326,7 +363,7 @@ def main():
                     ax.set_title(name, fontsize=14, pad=8)
 
             axes[row_idx, 0].text(
-                -0.08, 0.5, mask_type_key.capitalize(),
+                -0.08, 0.5, localized_mask_type_label(mask_type_key, args.turkish),
                 transform=axes[row_idx, 0].transAxes,
                 va='center', ha='right',
                 fontsize=15, fontweight='bold', rotation=90,
