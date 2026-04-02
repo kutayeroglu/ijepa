@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=pHmn50
+#SBATCH --job-name=lpHmn50
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=20
 #SBATCH --gres=gpu:1
-#SBATCH --output=%j_lp100_mn50.out
-#SBATCH --error=%j_lp100_mn50.err
+#SBATCH --output=%j_lp100_mid-mn50-vitb.out
+#SBATCH --error=%j_lp100_mid-mn50-vitb.err
 #SBATCH --chdir=.
 
 set -e
@@ -23,9 +23,9 @@ export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
 # -- Config --
 # TODO: Set CONFIG_TAG to match pretraining config write_tag (e.g. balon_mnoise_cmr060_vitb)
-CONFIG_TAG="bal_mn50_vitb"
+CONFIG_TAG="mid_mn50_vitb"
 # TODO: Set PRETRAINING_RUN_ID to the pretraining run to probe, or export before sbatch
-PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-REPLACE_WITH_PRETRAINING_RUN_ID}"
+PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-38479550_mid_mn50_vitb}"
 RUN_ID="${SLURM_JOB_ID:-manual}_lp100_mn"
 
 # -- Logs --
@@ -36,8 +36,8 @@ REAL_LOG_PATH="$SCRATCH_DIR/logs"
 REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
 
-MODEL_PATH="$REAL_LOG_PATH/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-latest.pth.tar"
-CONTAINER_MODEL_PATH="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-latest.pth.tar"
+MODEL_PATH="$REAL_LOG_PATH/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-ep100.pth.tar" # TODO
+CONTAINER_MODEL_PATH="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-ep100.pth.tar" # TODO
 PRETRAINING_RUN_DIR="$(dirname "$MODEL_PATH")"
 OUTPUTS_DIR="$PRETRAINING_RUN_DIR/linprobe/$RUN_ID"
 CONTAINER_OUTPUTS_DIR="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/linprobe/$RUN_ID"
@@ -71,9 +71,9 @@ CMD_ARGS=(
     --dataset_dir /mnt/data/imagenet
     --val_dir /mnt/data/imagenet/val
     --model_path "$CONTAINER_MODEL_PATH"
-    --model_name vit_base
+    --model_name vit_base # TODO
     --patch_size 16
-    --batch_size 1024
+    --batch_size 1024 
     --learning_rate 0.00625
     --weight_decay 0.0005
     --num_workers 10
