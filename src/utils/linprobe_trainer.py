@@ -4,6 +4,7 @@ import logging
 
 from tqdm import tqdm
 import torch
+import torch.distributed as dist
 import torch.nn as nn
 from torch.optim.lr_scheduler import StepLR
 
@@ -11,6 +12,19 @@ from src.utils.plot import plot_loss_curves
 
 
 logger = logging.getLogger(__name__)
+
+
+def _reduce_metrics(correct, total, loss_sum, device):
+    """All-reduce [correct, total, loss_sum] across ranks.
+
+    No-op when a distributed process group is not active.
+    """
+    if not (dist.is_available() and dist.is_initialized()):
+        return correct, total, loss_sum
+    t = torch.tensor([correct, total, loss_sum],
+                     dtype=torch.float64, device=device)
+    dist.all_reduce(t, op=dist.ReduceOp.SUM)
+    return int(t[0].item()), int(t[1].item()), t[2].item()
 
 
 def train_linear_probe(
@@ -22,33 +36,48 @@ def train_linear_probe(
     weight_decay,
     device,
     outputs_dir,
+    rank=0,
+    world_size=1,
+    train_sampler=None,
 ):
-    """Training loop"""
-    logger.info("Starting linear probe training")
+    """Training loop with optional distributed support.
+
+    When *rank*, *world_size*, and *train_sampler* are left at their
+    defaults the function behaves identically to the original single-GPU
+    version (full backward compatibility with ``main_linprobe.py``).
+    """
+    is_distributed = world_size > 1
+    is_main = rank == 0
+
+    logger.info("Starting linear probe training  "
+                "(rank=%d, world_size=%d, distributed=%s)",
+                rank, world_size, is_distributed)
+
     metrics_path = os.path.join(outputs_dir, "metrics.csv")
     best_checkpoint_path = os.path.join(outputs_dir, "best_linear_probe.pth")
     plot_path = os.path.join(outputs_dir, "training_loss_plot.png")
 
-    with open(metrics_path, "w", newline="") as metrics_handle:
-        writer = csv.writer(metrics_handle)
-        writer.writerow(
-            [
-                "epoch",
-                "train_loss",
-                "val_loss",
-                "train_acc",
-                "val_acc",
-                "lr",
-                "best_val_acc_so_far",
-            ]
-        )
+    if is_main:
+        with open(metrics_path, "w", newline="") as metrics_handle:
+            writer = csv.writer(metrics_handle)
+            writer.writerow(
+                [
+                    "epoch",
+                    "train_loss",
+                    "val_loss",
+                    "train_acc",
+                    "val_acc",
+                    "lr",
+                    "best_val_acc_so_far",
+                ]
+            )
 
-    # Mode configuration
-    model.encoder.eval()
+    inner = model.module if hasattr(model, "module") else model
+    inner.encoder.eval()
     model = model.to(device)
 
     optimizer = torch.optim.SGD(
-        model.classifier.parameters(),
+        inner.classifier.parameters(),
         lr=learning_rate,
         momentum=0.9,
         weight_decay=weight_decay,
@@ -73,11 +102,16 @@ def train_linear_probe(
     best_acc = 0.0
     train_losses, val_losses = [], []
     for epoch in range(num_epochs):
-        model.classifier.train()  # Train only the classifier head
+        if train_sampler is not None:
+            train_sampler.set_epoch(epoch)
+
+        inner.classifier.train()
         train_loss, train_correct, train_total = 0.0, 0, 0
         current_lr = optimizer.param_groups[0]["lr"]
 
-        train_pbar = tqdm(train_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Train]")
+        train_pbar = tqdm(train_loader,
+                          desc=f"Epoch {epoch + 1}/{num_epochs} [Train]",
+                          disable=(not is_main))
         for batch_idx, (images, labels) in enumerate(train_pbar):
             images, labels = images.to(device), labels.to(device)
 
@@ -95,25 +129,31 @@ def train_linear_probe(
             loss.backward()
             optimizer.step()
 
-            # Update metrics
             train_loss += loss.item()
             _, predicted = outputs.max(1)
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
 
-            train_pbar.set_postfix(
-                loss=f"{train_loss / train_total:.4f}",
-                acc=f"{100.0 * train_correct / train_total:.2f}%",
-            )
+            if is_main:
+                train_pbar.set_postfix(
+                    loss=f"{train_loss / train_total:.4f}",
+                    acc=f"{100.0 * train_correct / train_total:.2f}%",
+                )
 
-        train_losses.append(train_loss / len(train_loader))
+        # Reduce train metrics across ranks
+        train_correct, train_total, train_loss = _reduce_metrics(
+            train_correct, train_total, train_loss, device)
+        num_train_batches = len(train_loader) * world_size
+        train_losses.append(train_loss / num_train_batches)
         scheduler.step()
 
         # --- VALIDATION ---
         model.eval()
         val_loss, val_correct, val_total = 0.0, 0, 0
         with torch.no_grad():
-            val_pbar = tqdm(val_loader, desc=f"Epoch {epoch + 1}/{num_epochs} [Val]")
+            val_pbar = tqdm(val_loader,
+                            desc=f"Epoch {epoch + 1}/{num_epochs} [Val]",
+                            disable=(not is_main))
             for batch_idx, (images, labels) in enumerate(val_pbar):
                 images, labels = images.to(device), labels.to(device)
                 outputs = model(images)
@@ -130,11 +170,16 @@ def train_linear_probe(
                 _, predicted = outputs.max(1)
                 val_total += labels.size(0)
                 val_correct += predicted.eq(labels).sum().item()
-                val_pbar.set_postfix(acc=f"{100.0 * val_correct / val_total:.2f}%")
+                if is_main:
+                    val_pbar.set_postfix(acc=f"{100.0 * val_correct / val_total:.2f}%")
 
-        val_losses.append(val_loss / len(val_loader))
+        # Reduce val metrics across ranks
+        val_correct, val_total, val_loss = _reduce_metrics(
+            val_correct, val_total, val_loss, device)
+        num_val_batches = len(val_loader) * world_size
+        val_losses.append(val_loss / num_val_batches)
 
-        # Log epoch results
+        # Compute global accuracies (identical on all ranks after reduce)
         train_acc = 100.0 * train_correct / train_total
         val_acc = 100.0 * val_correct / val_total
         logger.info(
@@ -143,41 +188,44 @@ def train_linear_probe(
             f"LR: {current_lr:.6f}"
         )
 
-        # Save best model
+        # Save best model (rank 0 only)
         if val_acc > best_acc:
             logger.info(f"New best model! ({val_acc:.2f}% > {best_acc:.2f}%)")
             best_acc = val_acc
-            torch.save(
-                {
-                    "classifier": model.classifier.state_dict(),
-                    "epoch": epoch + 1,
-                    "val_acc": val_acc,
-                },
-                best_checkpoint_path,
-            )
+            if is_main:
+                torch.save(
+                    {
+                        "classifier": inner.classifier.state_dict(),
+                        "epoch": epoch + 1,
+                        "val_acc": val_acc,
+                    },
+                    best_checkpoint_path,
+                )
 
-        with open(metrics_path, "a", newline="") as metrics_handle:
-            writer = csv.writer(metrics_handle)
-            writer.writerow(
-                [
-                    epoch + 1,
-                    f"{train_losses[-1]:.6f}",
-                    f"{val_losses[-1]:.6f}",
-                    f"{train_acc:.4f}",
-                    f"{val_acc:.4f}",
-                    f"{current_lr:.8f}",
-                    f"{best_acc:.4f}",
-                ]
-            )
+        if is_main:
+            with open(metrics_path, "a", newline="") as metrics_handle:
+                writer = csv.writer(metrics_handle)
+                writer.writerow(
+                    [
+                        epoch + 1,
+                        f"{train_losses[-1]:.6f}",
+                        f"{val_losses[-1]:.6f}",
+                        f"{train_acc:.4f}",
+                        f"{val_acc:.4f}",
+                        f"{current_lr:.8f}",
+                        f"{best_acc:.4f}",
+                    ]
+                )
 
     logger.info(f"Training complete. Best validation accuracy: {best_acc:.2f}%")
 
-    plot_loss_curves(
-        train_losses,
-        val_losses,
-        num_epochs,
-        save_path=plot_path,
-    )
+    if is_main:
+        plot_loss_curves(
+            train_losses,
+            val_losses,
+            num_epochs,
+            save_path=plot_path,
+        )
 
     return {
         "best_acc": best_acc,

@@ -1,0 +1,96 @@
+#!/bin/bash
+#SBATCH --job-name=LpHmb4g
+#SBATCH --qos=acc_ehpc
+#SBATCH --account=etur91
+#SBATCH --time=3-00:00:00
+#SBATCH --ntasks=1
+#SBATCH --cpus-per-task=80
+#SBATCH --gres=gpu:4
+#SBATCH --output=%j_lp100_mb_4gpu_scaled.out
+#SBATCH --error=%j_lp100_mb_4gpu_scaled.err
+#SBATCH --chdir=.
+
+set -e
+export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+
+# -- Script --
+PROJECT_ROOT="$HOME/ijepa"
+cd "$PROJECT_ROOT"
+PROJECTS_BASE="/gpfs/projects/etur91/boga222803"
+SCRIPT_PATH="$(realpath --relative-to="$PROJECT_ROOT" "$0")"
+source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
+export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
+
+# -- Config --
+CONFIG_TAG="${CONFIG_TAG:-bal_mb_vitb}"
+PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-37972861_bal_mb_vitb}"
+CHECKPOINT_SUFFIX="${CHECKPOINT_SUFFIX:-latest}"
+RUN_ID="${SLURM_JOB_ID:-manual}_lp100_mb_4gpu"
+
+# -- Logs --
+SCRATCH_DIR="/gpfs/scratch/etur91"
+REAL_LOG_PATH="$SCRATCH_DIR/logs"
+
+# -- Data --
+REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
+LOCAL_DATA_DIR="$TMPDIR/imagenet"
+
+MODEL_PATH="$REAL_LOG_PATH/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-$CHECKPOINT_SUFFIX.pth.tar"
+CONTAINER_MODEL_PATH="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-$CHECKPOINT_SUFFIX.pth.tar"
+PRETRAINING_RUN_DIR="$(dirname "$MODEL_PATH")"
+OUTPUTS_DIR="$PRETRAINING_RUN_DIR/linprobe/$RUN_ID"
+CONTAINER_OUTPUTS_DIR="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/linprobe/$RUN_ID"
+RUN_OUTPUT_DIR="$OUTPUTS_DIR"
+
+mkdir -p "$OUTPUTS_DIR"
+mkdir -p "$LOCAL_DATA_DIR/train"
+mkdir -p "$LOCAL_DATA_DIR/val"
+
+echo "--- Staging and Extracting Data to Local SSD ($TMPDIR) ---"
+tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_train.tar" --strip-components=1 -C "$LOCAL_DATA_DIR/train"
+
+cd "$LOCAL_DATA_DIR/train"
+find . -name "*.tar" -print0 | xargs -0 -P 20 -I {} sh -c '
+    dir="${1%.tar}"
+    mkdir -p "$dir"
+    tar -xf "$1" -C "$dir"
+    rm "$1"
+' -- {}
+cd -
+
+tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_val.tar" --strip-components=1 -C "$LOCAL_DATA_DIR/val"
+
+echo "--- Data extraction complete ---"
+
+# -- Container execution --
+BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
+SIF_IMAGE="$PROJECTS_BASE/ijepa-env.sif"
+
+CMD_ARGS=(
+    --dataset_dir /mnt/data/imagenet
+    --val_dir /mnt/data/imagenet/val
+    --model_path "$CONTAINER_MODEL_PATH"
+    --model_name vit_base # TODO
+    --patch_size 16
+    --batch_size 1024 # TODO
+    --learning_rate 0.025
+    --weight_decay 0.0005
+    --num_workers 10
+    --num_epochs 30
+    --outputs_dir "$CONTAINER_OUTPUTS_DIR"
+    --run_id "$RUN_ID"
+    --devices cuda:0 cuda:1 cuda:2 cuda:3
+    ${EXTRA_ARGS}
+)
+
+module purge
+module load singularity/4.1.5
+
+print_run_header
+echo "--- Executing Distributed Linear Probe (4 GPUs) ---"
+singularity exec --nv \
+    --bind "$BIND_ARGS" \
+    "$SIF_IMAGE" \
+    python main_linprobe_distributed.py "${CMD_ARGS[@]}"
+
+echo "--- Job Finished Successfully ---"
