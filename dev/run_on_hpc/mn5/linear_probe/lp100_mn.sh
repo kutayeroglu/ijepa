@@ -22,10 +22,9 @@ source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
 # -- Config --
-# TODO: Set CONFIG_TAG to match pretraining config write_tag (e.g. balon_mnoise_cmr060_vitb)
-CONFIG_TAG="mid_mn50_vitb"
-# TODO: Set PRETRAINING_RUN_ID to the pretraining run to probe, or export before sbatch
+CONFIG_TAG="${CONFIG_TAG:-mid_mn50_vitb}"
 PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-38479550_mid_mn50_vitb}"
+CHECKPOINT_SUFFIX="${CHECKPOINT_SUFFIX:-latest}"
 RUN_ID="${SLURM_JOB_ID:-manual}_lp100_mn"
 
 # -- Logs --
@@ -36,8 +35,8 @@ REAL_LOG_PATH="$SCRATCH_DIR/logs"
 REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
 
-MODEL_PATH="$REAL_LOG_PATH/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-ep100.pth.tar" # TODO
-CONTAINER_MODEL_PATH="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-ep100.pth.tar" # TODO
+MODEL_PATH="$REAL_LOG_PATH/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-$CHECKPOINT_SUFFIX.pth.tar"
+CONTAINER_MODEL_PATH="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/$CONFIG_TAG-$CHECKPOINT_SUFFIX.pth.tar"
 PRETRAINING_RUN_DIR="$(dirname "$MODEL_PATH")"
 OUTPUTS_DIR="$PRETRAINING_RUN_DIR/linprobe/$RUN_ID"
 CONTAINER_OUTPUTS_DIR="/mnt/logs/ijepa/pretraining/$CONFIG_TAG/runs/$PRETRAINING_RUN_ID/linprobe/$RUN_ID"
