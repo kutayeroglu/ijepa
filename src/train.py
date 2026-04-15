@@ -31,6 +31,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from src.masks.multiblock import MaskCollator as MBMaskCollator
 from src.masks.multinoise import MaskCollator as NoiseMaskCollator
+from src.masks.quadrantnoise import MaskCollator as QuadrantNoiseMaskCollator
 from src.masks.utils import apply_masks
 from src.utils.distributed import init_distributed, AllReduce
 from src.utils.logging import CSVLogger, gpu_timer, grad_logger, AverageMeter
@@ -111,7 +112,7 @@ def main(args, resume_preempt=False):
     num_pred_masks = args["mask"]["num_pred_masks"]  # number of target blocks
     pred_mask_scale = args["mask"]["pred_mask_scale"]  # scale of target blocks
     aspect_ratio = args["mask"]["aspect_ratio"]  # aspect ratio of target blocks
-    mask_type = args["mask"].get("mask_type", "multiblock")  # mask type: "multiblock" or "multinoise"
+    mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | multinoise | quadrantnoise
     green_noise_data_path = args["mask"].get("green_noise_data_path", None)  # path to color noise patterns
     color_mask_ratio = args["mask"].get("color_mask_ratio", 0.15)
     enc_drop_order = args["mask"].get("enc_drop_order", "lowest")
@@ -329,6 +330,27 @@ def main(args, resume_preempt=False):
         if green_noise_data_path is None:
             raise ValueError("green_noise_data_path must be specified when using multinoise mask type")
         mask_collator = NoiseMaskCollator(
+            input_size=crop_size,
+            patch_size=patch_size,
+            enc_mask_scale=enc_mask_scale,
+            pred_mask_scale=pred_mask_scale,
+            aspect_ratio=aspect_ratio,
+            nenc=num_enc_masks,
+            npred=num_pred_masks,
+            min_keep=min_keep,
+            allow_overlap=allow_overlap,
+            debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
+            color_noise_path=green_noise_data_path,
+            color_mask_ratio=color_mask_ratio,
+            enc_drop_order=enc_drop_order,
+            pred_drop_order=pred_drop_order,
+        )
+    elif mask_type == "quadrantnoise":
+        if green_noise_data_path is None:
+            raise ValueError(
+                "green_noise_data_path must be specified when using quadrantnoise mask type"
+            )
+        mask_collator = QuadrantNoiseMaskCollator(
             input_size=crop_size,
             patch_size=patch_size,
             enc_mask_scale=enc_mask_scale,
