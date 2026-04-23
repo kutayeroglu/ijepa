@@ -126,7 +126,7 @@ def plot_iteration_speed(
     if annotate:
         for x_val, y_val in zip(x_values, y_values):
             ax.annotate(
-                f"{y_val:.1f}",
+                f"{y_val}",
                 (x_val, y_val),
                 textcoords="offset points",
                 xytext=(0, 8),
