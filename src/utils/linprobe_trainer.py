@@ -170,7 +170,7 @@ def train_linear_probe(
                 _, predicted = outputs.max(1)
                 val_total += labels.size(0)
                 val_correct += predicted.eq(labels).sum().item()
-                if is_main:
+                if is_main and not is_distributed:
                     val_pbar.set_postfix(acc=f"{100.0 * val_correct / val_total:.2f}%")
 
         # Reduce val metrics across ranks
