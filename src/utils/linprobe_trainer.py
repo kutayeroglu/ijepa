@@ -134,10 +134,13 @@ def train_linear_probe(
             train_total += labels.size(0)
             train_correct += predicted.eq(labels).sum().item()
 
-            if is_main:
+            # Same as val: skip tqdm postfix under DDP (counts are rank-local until all_reduce).
+            if is_main and not is_distributed:
+                avg_loss = train_loss / train_total
+                avg_acc = 100.0 * train_correct / train_total
                 train_pbar.set_postfix(
-                    loss=f"{train_loss / train_total:.4f}",
-                    acc=f"{100.0 * train_correct / train_total:.2f}%",
+                    loss=f"{avg_loss:.4f}",
+                    acc=f"{avg_acc:.2f}%",
                 )
 
         # Reduce train metrics across ranks
