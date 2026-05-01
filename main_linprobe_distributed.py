@@ -9,7 +9,10 @@ import argparse
 import logging
 import multiprocessing as mp
 import os
+import random
 import sys
+
+import numpy as np
 from collections import OrderedDict
 
 import torch
@@ -25,6 +28,7 @@ from src.models.vit_linear_probe import LinearProbeModel
 from src.models.vision_transformer import VIT_EMBED_DIMS
 from src.utils.distributed import init_distributed
 from src.utils.linprobe_trainer import train_linear_probe
+from src.utils.reproducibility import seed_rng, set_deterministic_backend
 from src.utils.run_tracking import (
     build_run_id,
     checkpoint_stem,
@@ -73,6 +77,8 @@ def parse_args():
     p.add_argument("--run_id", type=str, default=None)
     p.add_argument("--devices", type=str, nargs="+", default=["cuda:0"],
                    help="GPU devices (e.g. cuda:0 cuda:1 cuda:2 cuda:3)")
+    p.add_argument("--seed", type=int, default=0,
+                   help="RNG seed (Python / NumPy / PyTorch); deterministic cuDNN/TF32 enabled")
     return p.parse_args()
 
 
@@ -100,8 +106,16 @@ def _build_outputs_dir(output_root, run_id, model_path):
 # Distributed data loaders
 # ---------------------------------------------------------------------------
 
+def _linear_probe_worker_init_fn(worker_id):
+    # Module-level so DataLoader can pickle worker_init_fn under multiprocessing spawn.
+    worker_seed = torch.initial_seed() % 2**32
+    random.seed(worker_seed)
+    np.random.seed(worker_seed)
+    torch.manual_seed(worker_seed)
+
+
 def _make_dataloaders(data_dir, val_dir, batch_size, num_workers,
-                      world_size, rank, val_labels_file=None):
+                      world_size, rank, seed, val_labels_file=None):
     """Build train/val loaders.  Uses DistributedSampler when world_size > 1."""
     train_transform = transforms.Compose([
         transforms.RandomResizedCrop(224),
@@ -148,12 +162,25 @@ def _make_dataloaders(data_dir, val_dir, batch_size, num_workers,
     distributed = world_size > 1
     if distributed:
         train_sampler = DistributedSampler(
-            train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+            train_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=True,
+            seed=seed,
+        )
         val_sampler = DistributedSampler(
-            val_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+            val_dataset,
+            num_replicas=world_size,
+            rank=rank,
+            shuffle=False,
+            seed=seed,
+        )
     else:
         train_sampler = None
         val_sampler = None
+
+    train_generator = torch.Generator().manual_seed(seed)
+    val_generator = torch.Generator().manual_seed(seed)
 
     train_loader = DataLoader(
         train_dataset,
@@ -163,6 +190,8 @@ def _make_dataloaders(data_dir, val_dir, batch_size, num_workers,
         num_workers=num_workers,
         pin_memory=True,
         drop_last=distributed,
+        generator=train_generator,
+        worker_init_fn=_linear_probe_worker_init_fn if num_workers > 0 else None,
     )
     val_loader = DataLoader(
         val_dataset,
@@ -172,6 +201,8 @@ def _make_dataloaders(data_dir, val_dir, batch_size, num_workers,
         num_workers=num_workers,
         pin_memory=True,
         drop_last=False,
+        generator=val_generator,
+        worker_init_fn=_linear_probe_worker_init_fn if num_workers > 0 else None,
     )
     return train_loader, val_loader, train_sampler
 
@@ -199,6 +230,7 @@ def process_main(rank, args, world_size, devices):
 
     device = torch.device("cuda:0")
     torch.cuda.set_device(device)
+    set_deterministic_backend()
 
     logger.info("Initialised rank %d / %d  (distributed=%s)",
                 rank, world_size, distributed)
@@ -313,6 +345,7 @@ def process_main(rank, args, world_size, devices):
     encoder.eval()
 
     embed_dim = VIT_EMBED_DIMS[args.model_name]
+    seed_rng(args.seed)
     model = LinearProbeModel(
         encoder=encoder, embed_dim=embed_dim, num_classes=1000)
 
@@ -336,6 +369,7 @@ def process_main(rank, args, world_size, devices):
         num_workers=args.num_workers,
         world_size=world_size,
         rank=rank,
+        seed=args.seed,
         val_labels_file=args.val_labels_file,
     )
 
