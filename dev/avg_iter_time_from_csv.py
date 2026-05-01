@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Usage: avg_iter_time_from_csv.py [--dir DIR | CSV ...] [--glob PATTERN] [--per-file] [--skip-first-per-file] [--no-skip-epoch1-itr0] [--no-save] — also writes avg_iter_time_stats.txt in the run directory."""
+"""Usage: avg_iter_time_from_csv.py [--dir DIR | CSV ...] [--glob PATTERN] [--per-file] [--skip-first-per-file] [--no-skip-epoch1-itr0] [--no-save]
+
+Examples
+--------
+Directory containing per-rank CSVs (auto-saves avg_iter_time_stats.txt in that directory):
+  python3 dev/avg_iter_time_from_csv.py /path/to/run_dir
+
+If your files don't match the default *_r*.csv pattern:
+  python3 dev/avg_iter_time_from_csv.py /path/to/run_dir --glob "*.csv"
+"""
 import argparse
 import csv
 import re
