@@ -31,6 +31,7 @@ from torch.nn.parallel import DistributedDataParallel
 
 from src.masks.multiblock import MaskCollator as MBMaskCollator
 from src.masks.multinoise import MaskCollator as NoiseMaskCollator
+from src.masks.ng_multiblock import MaskCollator as NGMBMaskCollator
 from src.masks.quadrantnoise import MaskCollator as QuadrantNoiseMaskCollator
 from src.masks.utils import apply_masks
 from src.utils.distributed import init_distributed, AllReduce
@@ -112,11 +113,16 @@ def main(args, resume_preempt=False):
     num_pred_masks = args["mask"]["num_pred_masks"]  # number of target blocks
     pred_mask_scale = args["mask"]["pred_mask_scale"]  # scale of target blocks
     aspect_ratio = args["mask"]["aspect_ratio"]  # aspect ratio of target blocks
-    mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | multinoise | quadrantnoise
+    mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | multinoise | quadrantnoise | ng_multiblock
     green_noise_data_path = args["mask"].get("green_noise_data_path", None)  # path to color noise patterns
     color_mask_ratio = args["mask"].get("color_mask_ratio", 0.15)
     enc_drop_order = args["mask"].get("enc_drop_order", "lowest")
     pred_drop_order = args["mask"].get("pred_drop_order", "lowest")
+    # ng_multiblock-specific knobs (noise-weighted top-left corner sampling, Option A)
+    score_mode = args["mask"].get("score_mode", "boxsum")  # "boxsum" | "corner"
+    enc_bias = args["mask"].get("enc_bias", "high")  # "high" | "low" | "none"
+    pred_bias = args["mask"].get("pred_bias", "high")  # "high" | "low" | "none"
+    noise_temperature = float(args["mask"].get("noise_temperature", 0.5))
     # --
 
     # -- OPTIMIZATION
@@ -365,6 +371,28 @@ def main(args, resume_preempt=False):
             color_mask_ratio=color_mask_ratio,
             enc_drop_order=enc_drop_order,
             pred_drop_order=pred_drop_order,
+        )
+    elif mask_type == "ng_multiblock":
+        if green_noise_data_path is None:
+            raise ValueError(
+                "green_noise_data_path must be specified when using ng_multiblock mask type"
+            )
+        mask_collator = NGMBMaskCollator(
+            input_size=crop_size,
+            patch_size=patch_size,
+            enc_mask_scale=enc_mask_scale,
+            pred_mask_scale=pred_mask_scale,
+            aspect_ratio=aspect_ratio,
+            nenc=num_enc_masks,
+            npred=num_pred_masks,
+            min_keep=min_keep,
+            allow_overlap=allow_overlap,
+            debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
+            color_noise_path=green_noise_data_path,
+            score_mode=score_mode,
+            enc_bias=enc_bias,
+            pred_bias=pred_bias,
+            noise_temperature=noise_temperature,
         )
     else:
         mask_collator = MBMaskCollator(
