@@ -66,6 +66,12 @@ Use Turkish labels in the output figure::
     python visualization/visualize_masks.py \
         --image_path photo.jpg \
         --turkish
+
+Mechanic 1 (patch-grid overlay only, no masks)::
+
+    python visualization/visualize_masks.py \
+        --figure patch_grid \
+        --image_path photo.jpg
 """
 
 import argparse
@@ -75,6 +81,7 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+from matplotlib import patches as mpatches
 from PIL import Image
 from torchvision import transforms as T
 
@@ -138,6 +145,51 @@ def localized_labels(turkish: bool):
         'context': 'Context',
         'target_prefix': 'Target',
     }
+
+
+def localized_grid_labels(turkish: bool):
+    """Return panel labels for the patch-grid figure (Mechanic 1)."""
+    if turkish:
+        return {
+            'input': 'Girdi görüntüsü',
+            'grid_title_fmt': '{n}×{n} yama ızgarası',
+        }
+    return {
+        'input': 'Input image',
+        'grid_title_fmt': '{n}×{n} patch grid',
+    }
+
+
+def draw_patch_grid_panel(ax, image: np.ndarray, patch_size: int,
+                          highlight_patch=(0, 0), turkish: bool = False):
+    """Plot *image* on *ax* with a patch-grid overlay and one highlighted cell.
+
+    The grid lines are offset by 0.5 px so they align with ``imshow``'s
+    pixel boundaries (matplotlib places pixel ``n`` centered at ``n``).
+    """
+    H, W = image.shape[:2]
+    n_h, n_w = H // patch_size, W // patch_size
+    ax.imshow(image)
+    for k in range(n_h + 1):
+        ax.axhline(k * patch_size - 0.5, color='white', lw=0.6, alpha=0.85)
+    for k in range(n_w + 1):
+        ax.axvline(k * patch_size - 0.5, color='white', lw=0.6, alpha=0.85)
+
+    r, c = highlight_patch
+    ax.add_patch(mpatches.Rectangle(
+        (c * patch_size - 0.5, r * patch_size - 0.5),
+        patch_size, patch_size,
+        fill=False, edgecolor='red', linewidth=2.0))
+
+    text = (f'1 yama\n= {patch_size}×{patch_size} piksel'
+            if turkish else f'1 patch\n= {patch_size}×{patch_size} px')
+    ax.annotate(
+        text,
+        xy=((c + 1) * patch_size, (r + 1) * patch_size),
+        xytext=(c * patch_size + 55, r * patch_size + 55),
+        color='red', fontsize=10,
+        arrowprops=dict(arrowstyle='->', color='red', lw=1.2))
+    ax.set_axis_off()
 
 
 def localized_mask_type_label(mask_type: str, turkish: bool) -> str:
@@ -240,6 +292,11 @@ def main():
                         choices=['multinoise', 'multiblock', 'compare'],
                         help='Which mask collator to visualize '
                              '(compare = both methods on each image)')
+    parser.add_argument('--figure', type=str, default='masks',
+                        choices=['masks', 'patch_grid'],
+                        help='Which figure to generate: '
+                             '"masks" (current behavior, mask panels) or '
+                             '"patch_grid" (Mechanic 1: image + grid overlay)')
     parser.add_argument('--image_path', type=str, nargs='+', required=True,
                         help='Path(s) to input image(s) (JPEG/PNG)')
     parser.add_argument('--noise_path', type=str,
@@ -286,6 +343,32 @@ def main():
     out_dir.mkdir(parents=True, exist_ok=True)
 
     ps = args.patch_size
+
+    # -- Mechanic 1: image + patch-grid overlay -----------------------------
+    if args.figure == 'patch_grid':
+        img_path = args.image_path[0]
+        image = load_image(img_path, args.input_size)
+        n_grid = args.input_size // ps
+        g_labels = localized_grid_labels(args.turkish)
+
+        fig, axes = plt.subplots(1, 2, figsize=(8, 4))
+        axes[0].imshow(image)
+        axes[0].set_title(g_labels['input'], fontsize=12, pad=6)
+        axes[0].set_axis_off()
+
+        draw_patch_grid_panel(axes[1], image, ps, turkish=args.turkish)
+        axes[1].set_title(g_labels['grid_title_fmt'].format(n=n_grid),
+                          fontsize=12, pad=6)
+
+        plt.subplots_adjust(wspace=0.06, left=0.01, right=0.99,
+                            top=0.92, bottom=0.02)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'mechanic1_patch_grid.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
 
     mask_kwargs = dict(
         input_size=args.input_size, patch_size=ps,
