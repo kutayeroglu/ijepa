@@ -100,6 +100,14 @@ Mechanic 3.5 (noise-guided patch removal — multinoise only)::
         --noise_block_scale 0.30 \
         --color_mask_ratio 0.15
 
+Mechanic 3.6 (noise map transformation pipeline)::
+
+    python visualization/visualize_masks.py \
+        --figure noise_transform \
+        --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz \
+        --seed 42
+
 Mechanic 4 (carving trick: target/context overlap removal)::
 
     python visualization/visualize_masks.py \
@@ -123,7 +131,7 @@ from PIL import Image
 from torchvision import transforms as T
 
 from src.masks.multiblock import MaskCollator as MultiblockCollator
-from src.masks.multinoise import MaskCollator as MultinoiseCollator
+from src.masks.multinoise import MaskCollator as MultinoiseCollator, NormalizeBySliceMax
 
 
 # ---------------------------------------------------------------------------
@@ -699,6 +707,71 @@ def draw_noise_thresholded_panel(ax, image: np.ndarray, patch_size: int,
     ax.set_axis_off()
 
 
+def localized_noise_transform_labels(turkish: bool):
+    """Return per-panel step titles for the noise-transform figure (Mechanic 3.6).
+
+    Five titles correspond to:
+      0. raw noise context (before any transform)
+      1. after RandomCrop
+      2. after RandomHorizontalFlip
+      3. after RandomVerticalFlip
+      4. after NormalizeBySliceMax
+    """
+    if turkish:
+        return {
+            'step_titles': [
+                'Ham gürültü',
+                '+ RandomCrop({h}\u00d7{w})',
+                '+ RandomHorizontalFlip',
+                '+ RandomVerticalFlip',
+                '+ NormalizeBySliceMax',
+            ],
+            'flip_caption': 'p=0.5 ile uygulanır',
+        }
+    return {
+        'step_titles': [
+            'Raw noise',
+            '+ RandomCrop({h}\u00d7{w})',
+            '+ RandomHorizontalFlip',
+            '+ RandomVerticalFlip',
+            '+ NormalizeBySliceMax',
+        ],
+        'flip_caption': 'applied with p=0.5',
+    }
+
+
+def _draw_noise_on_image(ax, image: np.ndarray, noise_grid: np.ndarray,
+                          patch_size: int, cmap: str = 'Greens',
+                          alpha: float = 0.55):
+    """Overlay a patch-level noise heatmap on top of *image*."""
+    ax.imshow(image)
+    noise_full = np.repeat(np.repeat(noise_grid, patch_size, axis=0),
+                           patch_size, axis=1)
+    ax.imshow(noise_full, cmap=cmap, alpha=alpha,
+              vmin=float(noise_grid.min()), vmax=float(noise_grid.max()))
+    ax.set_axis_off()
+
+
+def _draw_transform_text_panel(ax, transform_names: list[str], header: str,
+                                box_facecolor: str = '#2c3e50',
+                                text_color: str = 'white'):
+    """Draw a centered text box listing the transformation steps."""
+    ax.set_xlim(0, 1)
+    ax.set_ylim(0, 1)
+    ax.set_axis_off()
+    bullet_lines = [f'  \u2022 {t}' for t in transform_names]
+    divider = '\u2500' * 28
+    text_str = f'{header}\n{divider}\n' + '\n'.join(bullet_lines)
+    ax.text(0.5, 0.5, text_str,
+            transform=ax.transAxes,
+            ha='center', va='center',
+            fontsize=9, color=text_color,
+            bbox=dict(facecolor=box_facecolor, alpha=0.88,
+                      edgecolor='none', boxstyle='round,pad=0.7'),
+            linespacing=1.8,
+            fontfamily='monospace')
+
+
 def localized_mask_type_label(mask_type: str, turkish: bool) -> str:
     """Return display label for the selected mask type."""
     if turkish:
@@ -801,7 +874,8 @@ def main():
                              '(compare = both methods on each image)')
     parser.add_argument('--figure', type=str, default='masks',
                         choices=['masks', 'patch_grid', 'block_size',
-                                 'placement', 'noise_dropout', 'carving'],
+                                 'placement', 'noise_dropout',
+                                 'noise_transform', 'carving'],
                         help='Which figure to generate: '
                              '"masks" (current behavior, mask panels), '
                              '"patch_grid" (Mechanic 1: image + grid overlay), '
@@ -809,7 +883,9 @@ def main():
                              'sweep), "placement" (Mechanic 3: corner '
                              'sampling), "noise_dropout" (Mechanic 3.5: '
                              'noise-guided patch removal from a sampled '
-                             'block), or "carving" (Mechanic 4: target/context '
+                             'block), "noise_transform" (Mechanic 3.6: '
+                             'noise map before/after transformation pipeline), '
+                             'or "carving" (Mechanic 4: target/context '
                              'overlap removal)')
     parser.add_argument('--image_path', type=str, nargs='+', required=True,
                         help='Path(s) to input image(s) (JPEG/PNG)')
@@ -1109,6 +1185,120 @@ def main():
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic3_5_noise_dropout.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
+
+    # -- Mechanic 3.6: noise map transformation pipeline -------------------
+    if args.figure == 'noise_transform':
+        img_path = args.image_path[0]
+        image = load_image(img_path, args.input_size)
+        grid_h = grid_w = args.input_size // ps
+        nt_labels = localized_noise_transform_labels(args.turkish)
+
+        # Load raw noise patterns  [L, M, N]  (M, N >> grid_h)
+        raw_data = np.load(args.noise_path)
+        raw_tensor = torch.from_numpy(raw_data[raw_data.files[0]]).float()
+        L, M, N = raw_tensor.shape
+
+        # Pick a noise slice index (isolated generator, doesn't affect global RNG)
+        g = torch.Generator()
+        g.manual_seed(args.seed)
+        idx = int(torch.randint(0, L, (1,), generator=g).item())
+
+        # Determine the RandomCrop window.  get_params consumes the same random
+        # numbers as the first T.RandomCrop call below (same seed), so the red
+        # box on the "before" panel aligns exactly with what was actually cropped.
+        torch.manual_seed(args.seed)
+        top_crop, left_crop, _, _ = T.RandomCrop.get_params(
+            raw_tensor, output_size=(grid_h, grid_w))
+
+        # Context window for the "before" panel: 5× crop size around the crop
+        # center so the red box occupies ~20 % of the panel width.
+        ctx_scale = 5
+        ctx_h = min(grid_h * ctx_scale, M)
+        ctx_w = min(grid_w * ctx_scale, N)
+        crop_cy = top_crop  + grid_h // 2
+        crop_cx = left_crop + grid_w // 2
+        ctx_top  = int(np.clip(crop_cy - ctx_h // 2, 0, M - ctx_h))
+        ctx_left = int(np.clip(crop_cx - ctx_w // 2, 0, N - ctx_w))
+        noise_context = raw_tensor[idx,
+                                   ctx_top:ctx_top  + ctx_h,
+                                   ctx_left:ctx_left + ctx_w].numpy()
+        box_top  = top_crop  - ctx_top
+        box_left = left_crop - ctx_left
+
+        # Apply each transform in sequence, saving the intermediate noise slice
+        # at each step.  Resetting to the same seed means the RandomCrop window
+        # matches the one computed by get_params above.
+        # The flips are forced (not random) so the figure always shows their
+        # visual effect; the p=0.5 caption below each panel conveys the true
+        # probability used during training.
+        torch.manual_seed(args.seed)
+        after_crop  = T.RandomCrop(grid_h)(raw_tensor)  # [L, h, w] — random, seeded
+        after_hflip = after_crop.flip(-1)                # [L, h, w] — forced hflip
+        after_vflip = after_hflip.flip(-2)               # [L, h, w] — forced vflip
+        after_norm  = NormalizeBySliceMax()(after_vflip) # [L, h, w] — deterministic
+
+        step_noise = [
+            after_crop[idx].numpy(),
+            after_hflip[idx].numpy(),
+            after_vflip[idx].numpy(),
+            after_norm[idx].numpy(),
+        ]
+
+        # Build per-panel step titles (fill in grid dimensions)
+        step_titles = [
+            t.format(h=grid_h, w=grid_w)
+            for t in nt_labels['step_titles']
+        ]
+
+        # Five-panel figure ------------------------------------------------
+        n_panels = 5
+        fig = plt.figure(figsize=(20, 5.4))
+        gs  = fig.add_gridspec(1, n_panels, wspace=0.12)
+        axes = [fig.add_subplot(gs[i]) for i in range(n_panels)]
+
+        # Panel 0: raw noise context excerpt with the crop window outlined
+        axes[0].imshow(noise_context, cmap='Greens',
+                       vmin=float(noise_context.min()),
+                       vmax=float(noise_context.max()),
+                       aspect='equal')
+        axes[0].add_patch(mpatches.Rectangle(
+            (box_left - 0.5, box_top - 0.5), grid_w, grid_h,
+            fill=False, edgecolor='#c0392b', linewidth=2.0, zorder=3))
+        axes[0].set_axis_off()
+        axes[0].set_title(
+            f"{step_titles[0]}\n(full size: {M}\u00d7{N})",
+            fontsize=11, pad=4)
+
+        # Panels 1–4: image + noise overlay after each cumulative transform
+        for i, noise in enumerate(step_noise):
+            _draw_noise_on_image(axes[i + 1], image, noise, ps)
+            axes[i + 1].set_title(step_titles[i + 1], fontsize=11, pad=4)
+
+        # Probability caption below the two flip panels (axes[2] and axes[3])
+        for ax_flip in (axes[2], axes[3]):
+            ax_flip.text(0.5, -0.08, nt_labels['flip_caption'],
+                         transform=ax_flip.transAxes,
+                         ha='center', va='top', fontsize=9,
+                         color='#7f8c8d', style='italic')
+
+        # Arrows between every adjacent pair of panels
+        arrow_kw = dict(arrowstyle='->', color='#2c3e50',
+                        lw=2.0, mutation_scale=20)
+        for axA, axB in zip(axes[:-1], axes[1:]):
+            con = mpatches.ConnectionPatch(
+                xyA=(1.0, 0.5), coordsA='axes fraction', axesA=axA,
+                xyB=(0.0, 0.5), coordsB='axes fraction', axesB=axB,
+                **arrow_kw, zorder=4)
+            fig.add_artist(con)
+
+        plt.subplots_adjust(left=0.02, right=0.99, top=0.88, bottom=0.12)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'mechanic3_6_noise_transform.{ext}'
             fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
             print(f'Saved {path.resolve()}')
         plt.close(fig)
