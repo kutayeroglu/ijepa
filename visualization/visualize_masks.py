@@ -72,9 +72,19 @@ Mechanic 1 (patch-grid overlay only, no masks)::
     python visualization/visualize_masks.py \
         --figure patch_grid \
         --image_path photo.jpg
+
+Mechanic 2 (scale + aspect-ratio sweep)::
+
+    python visualization/visualize_masks.py \
+        --figure block_size \
+        --image_path photo.jpg \
+        --scale_sweep 0.15 0.4 0.8 \
+        --ar_sweep 0.5 1.0 2.0 \
+        --fixed_scale_for_ar 0.4
 """
 
 import argparse
+import math
 from datetime import datetime
 from pathlib import Path
 
@@ -160,20 +170,48 @@ def localized_grid_labels(turkish: bool):
     }
 
 
-def draw_patch_grid_panel(ax, image: np.ndarray, patch_size: int,
-                          highlight_patch=(0, 0), turkish: bool = False):
-    """Plot *image* on *ax* with a patch-grid overlay and one highlighted cell.
+def localized_block_size_labels(turkish: bool):
+    """Return panel labels for the block-size figure (Mechanic 2)."""
+    if turkish:
+        return {
+            'title_fmt': ('ölçek = {s:.2f}, en/boy = {ar:.2f}\n'
+                          '(y, g) = ({h}, {w}), {n} yama'),
+            'row_scale': 'Ölçek alanı belirler',
+            'row_ar': 'En/boy oranı şekli belirler',
+            'caption': ('Hedef bloğu: aspect_ratio ∈ (0.75, 1.5);  '
+                        'bağlam bloğu: aspect_ratio = 1.0 (kare).'),
+        }
+    return {
+        'title_fmt': ('scale = {s:.2f}, ar = {ar:.2f}\n'
+                      '(h, w) = ({h}, {w}), {n} patches'),
+        'row_scale': 'Scale controls area',
+        'row_ar': 'Aspect ratio controls shape',
+        'caption': ('Target block: aspect_ratio ∈ (0.75, 1.5);  '
+                    'context block: aspect_ratio = 1.0 (square).'),
+    }
 
-    The grid lines are offset by 0.5 px so they align with ``imshow``'s
-    pixel boundaries (matplotlib places pixel ``n`` centered at ``n``).
+
+def _draw_grid_lines(ax, image: np.ndarray, patch_size: int,
+                     color: str = 'white', lw: float = 0.6,
+                     alpha: float = 0.85):
+    """Show *image* on *ax* and draw the patch-boundary grid on top.
+
+    Grid lines are offset by 0.5 px to align with ``imshow``'s pixel
+    boundaries (matplotlib places pixel ``n`` centered at ``n``).
     """
     H, W = image.shape[:2]
     n_h, n_w = H // patch_size, W // patch_size
     ax.imshow(image)
     for k in range(n_h + 1):
-        ax.axhline(k * patch_size - 0.5, color='white', lw=0.6, alpha=0.85)
+        ax.axhline(k * patch_size - 0.5, color=color, lw=lw, alpha=alpha)
     for k in range(n_w + 1):
-        ax.axvline(k * patch_size - 0.5, color='white', lw=0.6, alpha=0.85)
+        ax.axvline(k * patch_size - 0.5, color=color, lw=lw, alpha=alpha)
+
+
+def draw_patch_grid_panel(ax, image: np.ndarray, patch_size: int,
+                          highlight_patch=(0, 0), turkish: bool = False):
+    """Plot *image* on *ax* with a patch-grid overlay and one highlighted cell."""
+    _draw_grid_lines(ax, image, patch_size)
 
     r, c = highlight_patch
     ax.add_patch(mpatches.Rectangle(
@@ -189,6 +227,53 @@ def draw_patch_grid_panel(ax, image: np.ndarray, patch_size: int,
         xytext=(c * patch_size + 55, r * patch_size + 55),
         color='red', fontsize=10,
         arrowprops=dict(arrowstyle='->', color='red', lw=1.2))
+    ax.set_axis_off()
+
+
+def compute_block_hw(grid_h: int, grid_w: int,
+                     scale: float, aspect_ratio: float) -> tuple[int, int]:
+    """Deterministic mirror of ``MaskCollator._sample_block_size``.
+
+    Reproduces the (h, w) formula used by the multiblock collator
+    (``src/masks/multiblock.py``, lines ~75–86) without random sampling.
+    """
+    max_keep = int(grid_h * grid_w * scale)
+    h = int(round(math.sqrt(max_keep * aspect_ratio)))
+    w = int(round(math.sqrt(max_keep / aspect_ratio)))
+    while h >= grid_h:
+        h -= 1
+    while w >= grid_w:
+        w -= 1
+    return h, w
+
+
+def draw_block_panel(ax, image: np.ndarray, patch_size: int,
+                     block_h: int, block_w: int,
+                     anchor: tuple[int, int] | None = None,
+                     color: str = 'red',
+                     fill_alpha: float = 0.4):
+    """Dim *image*, draw patch grid, overlay a block of (block_h, block_w) patches.
+
+    ``anchor`` is either ``None`` (center the block in the grid) or an
+    explicit ``(top_row, left_col)`` tuple in patch coordinates.
+    """
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+
+    grid_h = image.shape[0] // patch_size
+    grid_w = image.shape[1] // patch_size
+
+    if anchor is None:
+        top = max((grid_h - block_h) // 2, 0)
+        left = max((grid_w - block_w) // 2, 0)
+    else:
+        top, left = anchor
+
+    ax.add_patch(mpatches.Rectangle(
+        (left * patch_size - 0.5, top * patch_size - 0.5),
+        block_w * patch_size, block_h * patch_size,
+        facecolor=color, alpha=fill_alpha,
+        edgecolor=color, linewidth=2.0))
     ax.set_axis_off()
 
 
@@ -293,10 +378,12 @@ def main():
                         help='Which mask collator to visualize '
                              '(compare = both methods on each image)')
     parser.add_argument('--figure', type=str, default='masks',
-                        choices=['masks', 'patch_grid'],
+                        choices=['masks', 'patch_grid', 'block_size'],
                         help='Which figure to generate: '
-                             '"masks" (current behavior, mask panels) or '
-                             '"patch_grid" (Mechanic 1: image + grid overlay)')
+                             '"masks" (current behavior, mask panels), '
+                             '"patch_grid" (Mechanic 1: image + grid overlay), '
+                             'or "block_size" (Mechanic 2: scale + aspect-ratio '
+                             'sweep)')
     parser.add_argument('--image_path', type=str, nargs='+', required=True,
                         help='Path(s) to input image(s) (JPEG/PNG)')
     parser.add_argument('--noise_path', type=str,
@@ -327,6 +414,17 @@ def main():
                              '(multinoise only): lowest or highest')
     parser.add_argument('--npred', type=int, default=4)
     parser.add_argument('--min_keep', type=int, default=10)
+    parser.add_argument('--scale_sweep', type=float, nargs=3,
+                        default=[0.15, 0.4, 0.8],
+                        help='Three scale values for the Mechanic 2 scale-sweep '
+                             'row (figure=block_size only)')
+    parser.add_argument('--ar_sweep', type=float, nargs=3,
+                        default=[0.5, 1.0, 2.0],
+                        help='Three aspect-ratio values for the Mechanic 2 '
+                             'ar-sweep row (figure=block_size only)')
+    parser.add_argument('--fixed_scale_for_ar', type=float, default=0.4,
+                        help='Scale held fixed in the aspect-ratio sweep row '
+                             '(figure=block_size only)')
     parser.add_argument('--dpi', type=int, default=300)
     parser.add_argument('--turkish', action='store_true',
                         help='Use Turkish labels in panel titles '
@@ -365,6 +463,57 @@ def main():
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic1_patch_grid.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
+
+    # -- Mechanic 2: scale & aspect-ratio sweep -----------------------------
+    if args.figure == 'block_size':
+        img_path = args.image_path[0]
+        image = load_image(img_path, args.input_size)
+        grid_h = grid_w = args.input_size // ps
+        bs_labels = localized_block_size_labels(args.turkish)
+
+        fig, axes = plt.subplots(2, 3, figsize=(11, 7.6))
+
+        for col, s in enumerate(args.scale_sweep):
+            h, w = compute_block_hw(grid_h, grid_w, s, 1.0)
+            draw_block_panel(axes[0, col], image, ps, h, w)
+            axes[0, col].set_title(
+                bs_labels['title_fmt'].format(
+                    s=s, ar=1.0, h=h, w=w, n=h * w),
+                fontsize=10, pad=4)
+
+        s_fixed = args.fixed_scale_for_ar
+        for col, ar in enumerate(args.ar_sweep):
+            h, w = compute_block_hw(grid_h, grid_w, s_fixed, ar)
+            draw_block_panel(axes[1, col], image, ps, h, w)
+            axes[1, col].set_title(
+                bs_labels['title_fmt'].format(
+                    s=s_fixed, ar=ar, h=h, w=w, n=h * w),
+                fontsize=10, pad=4)
+
+        axes[0, 0].text(
+            -0.06, 0.5, bs_labels['row_scale'],
+            transform=axes[0, 0].transAxes,
+            va='center', ha='right',
+            fontsize=12, fontweight='bold', rotation=90, color='#2c3e50')
+        axes[1, 0].text(
+            -0.06, 0.5, bs_labels['row_ar'],
+            transform=axes[1, 0].transAxes,
+            va='center', ha='right',
+            fontsize=12, fontweight='bold', rotation=90, color='#2c3e50')
+
+        fig.text(0.5, 0.02, bs_labels['caption'],
+                 ha='center', fontsize=10, style='italic', color='#34495e')
+
+        plt.subplots_adjust(wspace=0.06, hspace=0.18,
+                            left=0.06, right=0.99,
+                            top=0.94, bottom=0.08)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'mechanic2_block_size.{ext}'
             fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
             print(f'Saved {path.resolve()}')
         plt.close(fig)
