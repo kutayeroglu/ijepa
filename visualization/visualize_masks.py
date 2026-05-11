@@ -91,6 +91,15 @@ Mechanic 3 (corner sampling: valid region + samples)::
         --placement_block_ar 1.0 \
         --n_placements 4
 
+Mechanic 3.5 (noise-guided patch removal — multinoise only)::
+
+    python visualization/visualize_masks.py \
+        --figure noise_dropout \
+        --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz \
+        --noise_block_scale 0.30 \
+        --color_mask_ratio 0.15
+
 Mechanic 4 (carving trick: target/context overlap removal)::
 
     python visualization/visualize_masks.py \
@@ -121,7 +130,7 @@ from src.masks.multinoise import MaskCollator as MultinoiseCollator
 # Helpers
 # ---------------------------------------------------------------------------
 
-DIM_ALPHA = 0.25
+DIM_ALPHA = 0.40
 TR_MASK_TYPE_LABELS = {
     'multinoise': 'Çoklu Gürültü',
     'multiblock': 'Çoklu Blok',
@@ -422,7 +431,7 @@ def sample_placements(grid_h: int, grid_w: int,
 
 
 def localized_carving_labels(turkish: bool):
-    """Return panel labels for the carving figure (Mechanic 4)."""
+    """Return panel labels for the carving figure (  4)."""
     if turkish:
         return {
             'targets': '(a) Hedef bloklar',
@@ -562,6 +571,134 @@ def draw_final_panel(ax, image: np.ndarray, patch_size: int,
     ax.set_axis_off()
 
 
+def localized_noise_dropout_labels(turkish: bool):
+    """Return panel labels for the noise-dropout figure (Mechanic 3.5)."""
+    if turkish:
+        return {
+            'block_title_fmt': 'Blok şekli: (y, g) = ({h}, {w})',
+            'sampled': '(a) Örneklenen blok',
+            'noise_field': '(b) Renkli gürültü alanı',
+            'thresholded_fmt': '(c) Gürültü eşikleme sonrası ({pct:.0f}% düşürüldü)',
+            'cbar_label': 'Gürültü değeri',
+            'cbar_low': 'düşük',
+            'cbar_high': 'yüksek',
+            'cbar_dropped': 'düşürüldü',
+            'cbar_kept': 'tutuldu',
+        }
+    return {
+        'block_title_fmt': 'Block shape: (h, w) = ({h}, {w})',
+        'sampled': '(a) Sampled block',
+        'noise_field': '(b) Colored noise field',
+        'thresholded_fmt': '(c) After noise thresholding ({pct:.0f}% dropped)',
+        'cbar_label': 'Noise value',
+        'cbar_low': 'low',
+        'cbar_high': 'high',
+        'cbar_dropped': 'dropped',
+        'cbar_kept': 'kept',
+    }
+
+
+def apply_noise_threshold(block_mask_2d: np.ndarray,
+                          noise_grid: np.ndarray,
+                          ratio: float,
+                          drop_order: str = 'lowest'
+                          ) -> tuple[np.ndarray, np.ndarray]:
+    """Deterministic mirror of the noise-thresholding loop in multinoise.
+
+    Mirrors lines ~229–252 of src/masks/multinoise.py:
+      1. enumerate patches inside the rectangle
+      2. read their noise values
+      3. sort (descending if drop_order='lowest', else ascending)
+      4. keep the first (1-ratio) fraction, drop the rest
+
+    Returns ``(kept_mask, dropped_mask)`` — 2D bool arrays of the same
+    shape as *block_mask_2d*.
+    """
+    box_idx = np.argwhere(block_mask_2d)
+    kept = np.zeros_like(block_mask_2d, dtype=bool)
+    dropped = np.zeros_like(block_mask_2d, dtype=bool)
+    if len(box_idx) == 0:
+        return kept, dropped
+
+    box_noise = noise_grid[box_idx[:, 0], box_idx[:, 1]]
+    descending = (drop_order == 'lowest')
+    order = (np.argsort(-box_noise) if descending
+             else np.argsort(box_noise))
+
+    len_keep = int(len(box_idx) * (1.0 - ratio))
+    ids_keep = order[:len_keep]
+    ids_drop = order[len_keep:]
+
+    kept[box_idx[ids_keep, 0], box_idx[ids_keep, 1]] = True
+    dropped[box_idx[ids_drop, 0], box_idx[ids_drop, 1]] = True
+    return kept, dropped
+
+
+def draw_sampled_block_outline_panel(ax, image: np.ndarray, patch_size: int,
+                                     block: tuple[int, int, int, int],
+                                     color: str = '#c0392b'):
+    """Panel (a): dimmed image + grid + a single block outline."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+    _add_block_outlines(ax, patch_size, [block],
+                        color=color, linewidth=2.2)
+    ax.set_axis_off()
+
+
+def draw_noise_field_panel(ax, image: np.ndarray, patch_size: int,
+                           block: tuple[int, int, int, int],
+                           noise_grid: np.ndarray,
+                           block_color: str = '#c0392b',
+                           cmap: str = 'Greens',
+                           heatmap_alpha: float = 0.55,
+                           vmin: float | None = None,
+                           vmax: float | None = None):
+    """Panel (b): dimmed image + grid + noise heatmap + block outline.
+
+    The returned ``AxesImage`` handle uses the same cmap/vmin/vmax as the
+    rendered heatmap, so a colorbar built from these values will line up
+    exactly with the colors shown in the panel.
+    """
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+
+    if vmin is None:
+        vmin = float(noise_grid.min())
+    if vmax is None:
+        vmax = float(noise_grid.max())
+
+    noise_full = np.repeat(np.repeat(noise_grid, patch_size, axis=0),
+                           patch_size, axis=1)
+    im = ax.imshow(noise_full, cmap=cmap, alpha=heatmap_alpha,
+                   vmin=vmin, vmax=vmax)
+
+    _add_block_outlines(ax, patch_size, [block],
+                        color=block_color, linewidth=2.2)
+    ax.set_axis_off()
+    return im
+
+
+def draw_noise_thresholded_panel(ax, image: np.ndarray, patch_size: int,
+                                 block: tuple[int, int, int, int],
+                                 kept_mask: np.ndarray,
+                                 dropped_mask: np.ndarray,
+                                 keep_color: str = '#c0392b',
+                                 keep_rgba: tuple[float, float, float, float]
+                                 = (0.75, 0.22, 0.17, 0.55),
+                                 drop_rgba: tuple[float, float, float, float]
+                                 = (0.50, 0.55, 0.55, 0.55)):
+    """Panel (c): dimmed image + grid + block outline + kept/dropped tints."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+
+    _add_per_patch_overlay(ax, patch_size, kept_mask, keep_rgba)
+    _add_per_patch_overlay(ax, patch_size, dropped_mask, drop_rgba)
+
+    _add_block_outlines(ax, patch_size, [block],
+                        color=keep_color, linewidth=2.0)
+    ax.set_axis_off()
+
+
 def localized_mask_type_label(mask_type: str, turkish: bool) -> str:
     """Return display label for the selected mask type."""
     if turkish:
@@ -664,14 +801,16 @@ def main():
                              '(compare = both methods on each image)')
     parser.add_argument('--figure', type=str, default='masks',
                         choices=['masks', 'patch_grid', 'block_size',
-                                 'placement', 'carving'],
+                                 'placement', 'noise_dropout', 'carving'],
                         help='Which figure to generate: '
                              '"masks" (current behavior, mask panels), '
                              '"patch_grid" (Mechanic 1: image + grid overlay), '
                              '"block_size" (Mechanic 2: scale + aspect-ratio '
                              'sweep), "placement" (Mechanic 3: corner '
-                             'sampling), or "carving" (Mechanic 4: '
-                             'target/context overlap removal)')
+                             'sampling), "noise_dropout" (Mechanic 3.5: '
+                             'noise-guided patch removal from a sampled '
+                             'block), or "carving" (Mechanic 4: target/context '
+                             'overlap removal)')
     parser.add_argument('--image_path', type=str, nargs='+', required=True,
                         help='Path(s) to input image(s) (JPEG/PNG)')
     parser.add_argument('--noise_path', type=str,
@@ -720,6 +859,11 @@ def main():
     parser.add_argument('--n_placements', type=int, default=4,
                         help='Number of uniform-corner samples to overlay in '
                              'the Mechanic 3 multi-sample panel')
+    parser.add_argument('--noise_block_scale', type=float, default=0.30,
+                        help='Block scale used in Mechanic 3.5 noise-dropout '
+                             'figure')
+    parser.add_argument('--noise_block_ar', type=float, default=1.0,
+                        help='Block aspect-ratio used in Mechanic 3.5 figure')
     parser.add_argument('--carving_pred_scale', type=float, default=0.10,
                         help='Per-target scale used for the Mechanic 4 '
                              'figure (kept smaller than training defaults '
@@ -880,6 +1024,91 @@ def main():
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic3_placement.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
+
+    # -- Mechanic 3.5: noise-guided patch removal --------------------------
+    if args.figure == 'noise_dropout':
+        img_path = args.image_path[0]
+        image = load_image(img_path, args.input_size)
+        grid_h = grid_w = args.input_size // ps
+        nd_labels = localized_noise_dropout_labels(args.turkish)
+
+        block_h, block_w = compute_block_hw(
+            grid_h, grid_w,
+            args.noise_block_scale, args.noise_block_ar)
+
+        torch.manual_seed(args.seed)
+        g = torch.Generator()
+        g.manual_seed(args.seed)
+        placements = sample_placements(
+            grid_h, grid_w, block_h, block_w, 1, g)
+        block_top, block_left = placements[0]
+        block = (block_top, block_left, block_h, block_w)
+
+        coll = MultinoiseCollator(
+            input_size=(args.input_size, args.input_size),
+            patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            nenc=1, npred=args.npred, min_keep=args.min_keep,
+            allow_overlap=False,
+            color_noise_path=args.noise_path,
+            color_mask_ratio=args.color_mask_ratio,
+        )
+        noise_grid = coll._extract_noise_windows(1)[0].cpu().numpy()
+
+        block_mask = np.zeros((grid_h, grid_w), dtype=bool)
+        block_mask[block_top:block_top + block_h,
+                   block_left:block_left + block_w] = True
+        kept, dropped = apply_noise_threshold(
+            block_mask, noise_grid,
+            ratio=args.color_mask_ratio, drop_order='lowest')
+
+        fig, axes = plt.subplots(1, 3, figsize=(12, 5.4))
+
+        draw_sampled_block_outline_panel(axes[0], image, ps, block)
+        axes[0].set_title(nd_labels['sampled'], fontsize=11, pad=4)
+
+        noise_im = draw_noise_field_panel(
+            axes[1], image, ps, block, noise_grid)
+        axes[1].set_title(nd_labels['noise_field'], fontsize=11, pad=4)
+
+        draw_noise_thresholded_panel(axes[2], image, ps, block, kept, dropped)
+        axes[2].set_title(
+            nd_labels['thresholded_fmt'].format(
+                pct=args.color_mask_ratio * 100),
+            fontsize=11, pad=4)
+
+        fig.suptitle(
+            nd_labels['block_title_fmt'].format(h=block_h, w=block_w),
+            fontsize=12, fontweight='bold', color='#2c3e50', y=0.99)
+
+        plt.subplots_adjust(wspace=0.06, left=0.02, right=0.99,
+                            top=0.88, bottom=0.24)
+
+        cbar_ax = fig.add_axes([0.32, 0.13, 0.36, 0.035])
+        sm = plt.cm.ScalarMappable(
+            cmap=noise_im.get_cmap(), norm=noise_im.norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal')
+        cbar.set_ticks([noise_im.norm.vmin, noise_im.norm.vmax])
+        cbar.set_ticklabels([
+            f"{nd_labels['cbar_low']}\n({nd_labels['cbar_dropped']})",
+            f"{nd_labels['cbar_high']}\n({nd_labels['cbar_kept']})",
+        ])
+        for tick_label, color in zip(cbar.ax.get_xticklabels(),
+                                     ['#7f8c8d', '#c0392b']):
+            tick_label.set_color(color)
+            tick_label.set_fontweight('bold')
+            tick_label.set_fontsize(9)
+        cbar.set_label(nd_labels['cbar_label'], fontsize=9, labelpad=4)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'mechanic3_5_noise_dropout.{ext}'
             fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
             print(f'Saved {path.resolve()}')
         plt.close(fig)
