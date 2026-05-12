@@ -116,6 +116,18 @@ Mechanic 4 (carving trick: target/context overlap removal)::
         --npred 4 \
         --carving_pred_scale 0.10 \
         --carving_enc_scale 0.55
+
+Mechanic 4b (two rows: multiblock rectangles vs multinoise with the same
+sampled placements; left margin labels name each row)::
+
+    python visualization/visualize_masks.py \
+        --figure carving_extended \
+        --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz \
+        --npred 4 \
+        --carving_pred_scale 0.10 \
+        --carving_enc_scale 0.55 \
+        --color_mask_ratio 0.15
 """
 
 import argparse
@@ -457,6 +469,181 @@ def localized_carving_labels(turkish: bool):
         'caption': ('final = candidate  ⊙  ⋂ᵢ complement(Tᵢ)  '
                     '=  candidate  ∩  acceptable region'),
     }
+
+
+def localized_carving_extended_labels(turkish: bool):
+    """Left-side row labels for the two-row carving_extended figure."""
+    if turkish:
+        return {
+            'side_multiblock': 'Çoklu blok',
+            'side_multinoise': 'Çoklu gürültü',
+        }
+    return {
+        'side_multiblock': 'Multiblock',
+        'side_multinoise': 'Multinoise',
+    }
+
+
+def compute_multinoise_carving_state(
+        grid_h: int, grid_w: int,
+        targets: list[tuple[int, int, int, int]],
+        candidate: tuple[int, int, int, int],
+        noise_grid: np.ndarray,
+        color_mask_ratio: float,
+        pred_drop_order: str,
+        enc_drop_order: str,
+) -> tuple[list[np.ndarray], np.ndarray, np.ndarray, np.ndarray]:
+    """Fixed placements: reproduce multinoise target complements + context.
+
+    For each target rectangle, apply ``apply_noise_threshold`` (predictor
+    drop order).  Complements follow the collator: ``1 - mask_2d`` on the
+    **kept** mask.  Acceptable is the element-wise AND of complements.
+
+    Context matches ``_sample_noisy_block_mask``: threshold noise on the
+    full candidate rectangle first, then multiply by each complement.
+
+    Returns
+    -------
+    target_kepts
+        List of ``[H, W]`` bool — kept predictor patches per target.
+    acceptable
+        ``[H, W]`` bool — AND of complements (where context may overlap).
+    cand_after_noise
+        Kept patches after noise only (inside candidate rectangle).
+    final_carved
+        ``cand_after_noise & acceptable``.
+    """
+    target_kepts: list[np.ndarray] = []
+    complements: list[np.ndarray] = []
+    for (top, left, h, w) in targets:
+        rect = np.zeros((grid_h, grid_w), dtype=bool)
+        rect[top:top + h, left:left + w] = True
+        kept, _ = apply_noise_threshold(
+            rect, noise_grid, color_mask_ratio,
+            drop_order=pred_drop_order)
+        kept = kept.astype(bool)
+        target_kepts.append(kept)
+        complements.append(~kept)
+
+    acceptable = np.ones((grid_h, grid_w), dtype=bool)
+    for comp in complements:
+        acceptable &= comp.astype(bool)
+
+    ct, cl, ch, cw = candidate
+    cand_block = np.zeros((grid_h, grid_w), dtype=bool)
+    cand_block[ct:ct + ch, cl:cl + cw] = True
+    cand_after_noise, _ = apply_noise_threshold(
+        cand_block, noise_grid, color_mask_ratio,
+        drop_order=enc_drop_order)
+    cand_after_noise = cand_after_noise.astype(bool)
+    final_carved = cand_after_noise & acceptable
+    return target_kepts, acceptable, cand_after_noise, final_carved
+
+
+def _union_kept_masks(kept_list: list[np.ndarray]) -> np.ndarray:
+    u = np.zeros_like(kept_list[0], dtype=bool)
+    for m in kept_list:
+        u |= m
+    return u
+
+
+def draw_multinoise_targets_kept_panel(
+        ax, image: np.ndarray, patch_size: int,
+        target_kepts: list[np.ndarray],
+        targets: list[tuple[int, int, int, int]],
+        fill_colors: list[tuple[float, float, float, float]] | None = None):
+    """Panel (a′): dimmed grid + per-target kept patches + dashed bbox."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+    if fill_colors is None:
+        fill_colors = [
+            (0.75, 0.22, 0.17, 0.52),
+            (0.20, 0.45, 0.75, 0.48),
+            (0.55, 0.35, 0.75, 0.45),
+            (0.15, 0.65, 0.50, 0.45),
+            (0.85, 0.55, 0.15, 0.45),
+            (0.45, 0.20, 0.55, 0.45),
+        ]
+    for i, kept in enumerate(target_kepts):
+        rgba = fill_colors[i % len(fill_colors)]
+        _add_per_patch_overlay(ax, patch_size, kept, rgba)
+    dash = (0, (3, 3))
+    for i, (top, left, h, w) in enumerate(targets):
+        ax.add_patch(mpatches.Rectangle(
+            (left * patch_size - 0.5, top * patch_size - 0.5),
+            w * patch_size, h * patch_size,
+            fill=False, edgecolor='#7f8c8d', linewidth=1.2,
+            linestyle=dash, zorder=2))
+        ax.text(
+            (left + w / 2) * patch_size - 0.5,
+            (top + h / 2) * patch_size - 0.5,
+            f'T{i + 1}', color='#2c3e50', fontsize=10, fontweight='bold',
+            ha='center', va='center', zorder=4,
+            bbox=dict(facecolor='white', alpha=0.82,
+                      edgecolor='none', pad=1.5))
+    ax.set_axis_off()
+
+
+def draw_multinoise_acceptable_kept_panel(
+        ax, image: np.ndarray, patch_size: int,
+        target_kepts: list[np.ndarray],
+        targets: list[tuple[int, int, int, int]],
+        target_color: str = '#c0392b',
+        accept_rgba: tuple[float, float, float, float] = (
+            0.15, 0.68, 0.38, 0.40),
+        block_rgba: tuple[float, float, float, float] = (
+            0.75, 0.22, 0.17, 0.30)):
+    """Panel (b′): green outside union of *kept* targets; union tinted red."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+    union_k = _union_kept_masks(target_kepts)
+    _add_per_patch_overlay(ax, patch_size, ~union_k, accept_rgba)
+    _add_per_patch_overlay(ax, patch_size, union_k, block_rgba)
+    labels = [f'T{i + 1}' for i in range(len(targets))]
+    _add_block_outlines(ax, patch_size, targets,
+                        color=target_color, linewidth=1.4,
+                        labels=labels)
+    ax.set_axis_off()
+
+
+def draw_multinoise_candidate_kept_panel(
+        ax, image: np.ndarray, patch_size: int,
+        target_kepts: list[np.ndarray],
+        targets: list[tuple[int, int, int, int]],
+        candidate: tuple[int, int, int, int],
+        target_color: str = '#c0392b',
+        candidate_color: str = '#2980b9'):
+    """Panel (c′): acceptable-from-kept + candidate rectangle outline."""
+    draw_multinoise_acceptable_kept_panel(
+        ax, image, patch_size, target_kepts, targets,
+        target_color=target_color)
+    _add_block_outlines(ax, patch_size, [candidate],
+                        color=candidate_color, linewidth=2.5,
+                        labels=['C'])
+    ax.set_axis_off()
+
+
+def draw_multinoise_final_kept_panel(
+        ax, image: np.ndarray, patch_size: int,
+        targets: list[tuple[int, int, int, int]],
+        candidate: tuple[int, int, int, int],
+        final_mask: np.ndarray,
+        target_color: str = '#c0392b',
+        candidate_color: str = '#2980b9',
+        final_rgba: tuple[float, float, float, float] = (
+            0.16, 0.50, 0.73, 0.55)):
+    """Panel (d′): carved context after noise then complement multiply."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+    _add_per_patch_overlay(ax, patch_size, final_mask, final_rgba)
+    labels = [f'T{i + 1}' for i in range(len(targets))]
+    _add_block_outlines(ax, patch_size, targets,
+                        color=target_color, linewidth=1.4,
+                        labels=labels)
+    _add_block_outlines(ax, patch_size, [candidate],
+                        color=candidate_color, linewidth=2.0,
+                        labels=['C'])
+    ax.set_axis_off()
 
 
 def _compute_union_mask(grid_h: int, grid_w: int,
@@ -875,7 +1062,7 @@ def main():
     parser.add_argument('--figure', type=str, default='masks',
                         choices=['masks', 'patch_grid', 'block_size',
                                  'placement', 'noise_dropout',
-                                 'noise_transform', 'carving'],
+                                 'noise_transform', 'carving', 'carving_extended'],
                         help='Which figure to generate: '
                              '"masks" (current behavior, mask panels), '
                              '"patch_grid" (Mechanic 1: image + grid overlay), '
@@ -885,8 +1072,11 @@ def main():
                              'noise-guided patch removal from a sampled '
                              'block), "noise_transform" (Mechanic 3.6: '
                              'noise map before/after transformation pipeline), '
-                             'or "carving" (Mechanic 4: target/context '
-                             'overlap removal)')
+                             '"carving" (Mechanic 4: target/context '
+                             'overlap removal), or "carving_extended" '
+                             '(Mechanic 4 + second row for multinoise: '
+                             'noise-thresholded targets and patch-accurate '
+                             'complements)')
     parser.add_argument('--image_path', type=str, nargs='+', required=True,
                         help='Path(s) to input image(s) (JPEG/PNG)')
     parser.add_argument('--noise_path', type=str,
@@ -1305,7 +1495,7 @@ def main():
         return
 
     # -- Mechanic 4: the carving trick (target/context overlap removal) ----
-    if args.figure == 'carving':
+    if args.figure in ('carving', 'carving_extended'):
         img_path = args.image_path[0]
         image = load_image(img_path, args.input_size)
         grid_h = grid_w = args.input_size // ps
@@ -1327,28 +1517,100 @@ def main():
         candidate = (context_corner[0], context_corner[1],
                      context_h, context_w)
 
-        fig, axes = plt.subplots(1, 4, figsize=(15, 4.6))
+        if args.figure == 'carving':
+            fig, axes = plt.subplots(1, 4, figsize=(15, 4.6))
 
-        draw_targets_only_panel(axes[0], image, ps, targets)
-        axes[0].set_title(cv_labels['targets'], fontsize=11, pad=4)
+            draw_targets_only_panel(axes[0], image, ps, targets)
+            axes[0].set_title(cv_labels['targets'], fontsize=11, pad=4)
 
-        draw_acceptable_panel(axes[1], image, ps, targets)
-        axes[1].set_title(cv_labels['acceptable'], fontsize=11, pad=4)
+            draw_acceptable_panel(axes[1], image, ps, targets)
+            axes[1].set_title(cv_labels['acceptable'], fontsize=11, pad=4)
 
-        draw_candidate_panel(axes[2], image, ps, targets, candidate)
-        axes[2].set_title(cv_labels['candidate'], fontsize=11, pad=4)
+            draw_candidate_panel(axes[2], image, ps, targets, candidate)
+            axes[2].set_title(cv_labels['candidate'], fontsize=11, pad=4)
 
-        draw_final_panel(axes[3], image, ps, targets, candidate)
-        axes[3].set_title(cv_labels['final'], fontsize=11, pad=4)
+            draw_final_panel(axes[3], image, ps, targets, candidate)
+            axes[3].set_title(cv_labels['final'], fontsize=11, pad=4)
 
-        fig.text(0.5, 0.03, cv_labels['caption'],
-                 ha='center', fontsize=10, style='italic', color='#34495e')
+            fig.text(0.5, 0.03, cv_labels['caption'],
+                     ha='center', fontsize=10, style='italic', color='#34495e')
 
-        plt.subplots_adjust(wspace=0.06, left=0.02, right=0.99,
-                            top=0.92, bottom=0.10)
+            plt.subplots_adjust(wspace=0.06, left=0.02, right=0.99,
+                                top=0.92, bottom=0.10)
+
+            for ext in ('png', 'pdf'):
+                path = out_dir / f'mechanic4_carving.{ext}'
+                fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+                print(f'Saved {path.resolve()}')
+            plt.close(fig)
+            return
+
+        ext_labels = localized_carving_extended_labels(args.turkish)
+        coll = MultinoiseCollator(
+            input_size=(args.input_size, args.input_size),
+            patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            nenc=1, npred=args.npred, min_keep=args.min_keep,
+            allow_overlap=False,
+            color_noise_path=args.noise_path,
+            color_mask_ratio=args.color_mask_ratio,
+            enc_drop_order=args.enc_drop_order,
+            pred_drop_order=args.pred_drop_order,
+        )
+        noise_grid = coll._extract_noise_windows(1)[0].cpu().numpy()
+        target_kepts, _acceptable, _cand_noise, final_carved = (
+            compute_multinoise_carving_state(
+                grid_h, grid_w, targets, candidate, noise_grid,
+                args.color_mask_ratio,
+                pred_drop_order=args.pred_drop_order,
+                enc_drop_order=args.enc_drop_order))
+
+        fig, axes = plt.subplots(2, 4, figsize=(15, 8.6))
+
+        draw_targets_only_panel(axes[0, 0], image, ps, targets)
+        axes[0, 0].set_title(cv_labels['targets'], fontsize=11, pad=4)
+
+        draw_acceptable_panel(axes[0, 1], image, ps, targets)
+        axes[0, 1].set_title(cv_labels['acceptable'], fontsize=11, pad=4)
+
+        draw_candidate_panel(axes[0, 2], image, ps, targets, candidate)
+        axes[0, 2].set_title(cv_labels['candidate'], fontsize=11, pad=4)
+
+        draw_final_panel(axes[0, 3], image, ps, targets, candidate)
+        axes[0, 3].set_title(cv_labels['final'], fontsize=11, pad=4)
+
+        draw_multinoise_targets_kept_panel(
+            axes[1, 0], image, ps, target_kepts, targets)
+        axes[1, 0].set_title(cv_labels['targets'], fontsize=11, pad=4)
+
+        draw_multinoise_acceptable_kept_panel(
+            axes[1, 1], image, ps, target_kepts, targets)
+        axes[1, 1].set_title(cv_labels['acceptable'], fontsize=11, pad=4)
+
+        draw_multinoise_candidate_kept_panel(
+            axes[1, 2], image, ps, target_kepts, targets, candidate)
+        axes[1, 2].set_title(cv_labels['candidate'], fontsize=11, pad=4)
+
+        draw_multinoise_final_kept_panel(
+            axes[1, 3], image, ps, targets, candidate, final_carved)
+        axes[1, 3].set_title(cv_labels['final'], fontsize=11, pad=4)
+
+        fig.text(0.5, 0.04, cv_labels['caption'],
+                 ha='center', fontsize=9, style='italic', color='#34495e')
+
+        side_kw = dict(
+            rotation=90, va='center', ha='center',
+            fontsize=20, fontweight='bold', color='#2c3e50')
+        fig.text(0.035, 0.705, ext_labels['side_multiblock'], **side_kw)
+        fig.text(0.035, 0.315, ext_labels['side_multinoise'], **side_kw)
+
+        plt.subplots_adjust(wspace=0.06, hspace=0.28,
+                            left=0.09, right=0.99, top=0.90, bottom=0.11)
 
         for ext in ('png', 'pdf'):
-            path = out_dir / f'mechanic4_carving.{ext}'
+            path = out_dir / f'mechanic4_carving_extended.{ext}'
             fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
             print(f'Saved {path.resolve()}')
         plt.close(fig)
