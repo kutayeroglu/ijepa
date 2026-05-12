@@ -100,6 +100,15 @@ Mechanic 3.5 (noise-guided patch removal — multinoise only)::
         --noise_block_scale 0.30 \
         --color_mask_ratio 0.15
 
+Noise-dropout ColormAE (full-grid: noise overlay then drop lowest-noise
+patches; default 75% dropped, no rectangular block sampling)::
+
+    python visualization/visualize_masks.py \
+        --figure noise_dropout_colormae \
+        --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz \
+        --colormae_drop_ratio 0.75
+
 Mechanic 3.6 (noise map transformation pipeline)::
 
     python visualization/visualize_masks.py \
@@ -793,6 +802,31 @@ def localized_noise_dropout_labels(turkish: bool):
     }
 
 
+def localized_noise_dropout_colormae_labels(turkish: bool):
+    """Return panel labels for the noise-dropout ColormAE-style full-grid figure."""
+    if turkish:
+        return {
+            'image_grid': '(a) Girdi + yama tablosu',
+            'noise_field': '(b) Renkli gürültü (tüm bölgeler)',
+            'thresholded_fmt': '(c) En düşük gürültülü yamaların %{pct:.0f}\'i düşürüldü',
+            'cbar_label': 'Gürültü değeri',
+            'cbar_low': 'düşük',
+            'cbar_high': 'yüksek',
+            'cbar_dropped': 'düşürüldü',
+            'cbar_kept': 'tutuldu',
+        }
+    return {
+        'image_grid': '(a) Input + patch grid',
+        'noise_field': '(b) Colored noise field (full image)',
+        'thresholded_fmt': '(c) Lowest-noise {pct:.0f}% of patches dropped',
+        'cbar_label': 'Noise value',
+        'cbar_low': 'low',
+        'cbar_high': 'high',
+        'cbar_dropped': 'dropped',
+        'cbar_kept': 'kept',
+    }
+
+
 def apply_noise_threshold(block_mask_2d: np.ndarray,
                           noise_grid: np.ndarray,
                           ratio: float,
@@ -841,14 +875,16 @@ def draw_sampled_block_outline_panel(ax, image: np.ndarray, patch_size: int,
 
 
 def draw_noise_field_panel(ax, image: np.ndarray, patch_size: int,
-                           block: tuple[int, int, int, int],
+                           block: tuple[int, int, int, int] | None,
                            noise_grid: np.ndarray,
                            block_color: str = '#c0392b',
                            cmap: str = 'Greens',
                            heatmap_alpha: float = 0.55,
                            vmin: float | None = None,
                            vmax: float | None = None):
-    """Panel (b): dimmed image + grid + noise heatmap + block outline.
+    """Panel (b): dimmed image + grid + noise heatmap + optional block outline.
+
+    If *block* is ``None``, no rectangle is drawn (full-image ColormAE-style).
 
     The returned ``AxesImage`` handle uses the same cmap/vmin/vmax as the
     rendered heatmap, so a colorbar built from these values will line up
@@ -867,14 +903,15 @@ def draw_noise_field_panel(ax, image: np.ndarray, patch_size: int,
     im = ax.imshow(noise_full, cmap=cmap, alpha=heatmap_alpha,
                    vmin=vmin, vmax=vmax)
 
-    _add_block_outlines(ax, patch_size, [block],
-                        color=block_color, linewidth=2.2)
+    if block is not None:
+        _add_block_outlines(ax, patch_size, [block],
+                            color=block_color, linewidth=2.2)
     ax.set_axis_off()
     return im
 
 
 def draw_noise_thresholded_panel(ax, image: np.ndarray, patch_size: int,
-                                 block: tuple[int, int, int, int],
+                                 block: tuple[int, int, int, int] | None,
                                  kept_mask: np.ndarray,
                                  dropped_mask: np.ndarray,
                                  keep_color: str = '#c0392b',
@@ -882,15 +919,16 @@ def draw_noise_thresholded_panel(ax, image: np.ndarray, patch_size: int,
                                  = (0.75, 0.22, 0.17, 0.55),
                                  drop_rgba: tuple[float, float, float, float]
                                  = (0.50, 0.55, 0.55, 0.55)):
-    """Panel (c): dimmed image + grid + block outline + kept/dropped tints."""
+    """Panel (c): dimmed image + grid + kept/dropped tints + optional block."""
     dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
     _draw_grid_lines(ax, dimmed, patch_size)
 
     _add_per_patch_overlay(ax, patch_size, kept_mask, keep_rgba)
     _add_per_patch_overlay(ax, patch_size, dropped_mask, drop_rgba)
 
-    _add_block_outlines(ax, patch_size, [block],
-                        color=keep_color, linewidth=2.0)
+    if block is not None:
+        _add_block_outlines(ax, patch_size, [block],
+                            color=keep_color, linewidth=2.0)
     ax.set_axis_off()
 
 
@@ -1062,6 +1100,7 @@ def main():
     parser.add_argument('--figure', type=str, default='masks',
                         choices=['masks', 'patch_grid', 'block_size',
                                  'placement', 'noise_dropout',
+                                 'noise_dropout_colormae',
                                  'noise_transform', 'carving', 'carving_extended'],
                         help='Which figure to generate: '
                              '"masks" (current behavior, mask panels), '
@@ -1070,7 +1109,10 @@ def main():
                              'sweep), "placement" (Mechanic 3: corner '
                              'sampling), "noise_dropout" (Mechanic 3.5: '
                              'noise-guided patch removal from a sampled '
-                             'block), "noise_transform" (Mechanic 3.6: '
+                             'block), "noise_dropout_colormae" (full-image noise '
+                             'overlay; lowest-noise patch dropout, '
+                             '``--colormae_drop_ratio``), "noise_transform" '
+                             '(Mechanic 3.6: '
                              'noise map before/after transformation pipeline), '
                              '"carving" (Mechanic 4: target/context '
                              'overlap removal), or "carving_extended" '
@@ -1130,6 +1172,9 @@ def main():
                              'figure')
     parser.add_argument('--noise_block_ar', type=float, default=1.0,
                         help='Block aspect-ratio used in Mechanic 3.5 figure')
+    parser.add_argument('--colormae_drop_ratio', type=float, default=0.75,
+                        help='Fraction of patches dropped (lowest noise first) '
+                             'for figure=noise_dropout_colormae')
     parser.add_argument('--carving_pred_scale', type=float, default=0.10,
                         help='Per-target scale used for the Mechanic 4 '
                              'figure (kept smaller than training defaults '
@@ -1375,6 +1420,78 @@ def main():
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic3_5_noise_dropout.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
+
+    # -- Noise-dropout ColormAE: full-image noise + global dropout ----------
+    if args.figure == 'noise_dropout_colormae':
+        img_path = args.image_path[0]
+        image = load_image(img_path, args.input_size)
+        grid_h = grid_w = args.input_size // ps
+        ndcm_labels = localized_noise_dropout_colormae_labels(args.turkish)
+
+        ratio = args.colormae_drop_ratio
+        if not 0.0 < ratio < 1.0:
+            raise ValueError('colormae_drop_ratio must be in (0, 1)')
+
+        torch.manual_seed(args.seed)
+        coll = MultinoiseCollator(
+            input_size=(args.input_size, args.input_size),
+            patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            nenc=1, npred=args.npred, min_keep=args.min_keep,
+            allow_overlap=False,
+            color_noise_path=args.noise_path,
+            color_mask_ratio=args.color_mask_ratio,
+        )
+        noise_grid = coll._extract_noise_windows(1)[0].cpu().numpy()
+
+        full_mask = np.ones((grid_h, grid_w), dtype=bool)
+        kept, dropped = apply_noise_threshold(
+            full_mask, noise_grid, ratio=ratio, drop_order='lowest')
+
+        fig, axes = plt.subplots(1, 3, figsize=(12, 5.4))
+
+        _draw_grid_lines(axes[0], image, ps)
+        axes[0].set_axis_off()
+        axes[0].set_title(ndcm_labels['image_grid'], fontsize=11, pad=4)
+
+        noise_im = draw_noise_field_panel(
+            axes[1], image, ps, block=None, noise_grid=noise_grid)
+        axes[1].set_title(ndcm_labels['noise_field'], fontsize=11, pad=4)
+
+        draw_noise_thresholded_panel(
+            axes[2], image, ps, block=None, kept_mask=kept, dropped_mask=dropped)
+        axes[2].set_title(
+            ndcm_labels['thresholded_fmt'].format(pct=ratio * 100),
+            fontsize=11, pad=4)
+
+        plt.subplots_adjust(wspace=0.06, left=0.02, right=0.99,
+                            top=0.88, bottom=0.24)
+
+        cbar_ax = fig.add_axes([0.32, 0.13, 0.36, 0.035])
+        sm = plt.cm.ScalarMappable(
+            cmap=noise_im.get_cmap(), norm=noise_im.norm)
+        sm.set_array([])
+        cbar = fig.colorbar(sm, cax=cbar_ax, orientation='horizontal')
+        cbar.set_ticks([noise_im.norm.vmin, noise_im.norm.vmax])
+        cbar.set_ticklabels([
+            f"{ndcm_labels['cbar_low']}\n({ndcm_labels['cbar_dropped']})",
+            f"{ndcm_labels['cbar_high']}\n({ndcm_labels['cbar_kept']})",
+        ])
+        for tick_label, color in zip(cbar.ax.get_xticklabels(),
+                                     ['#7f8c8d', '#c0392b']):
+            tick_label.set_color(color)
+            tick_label.set_fontweight('bold')
+            tick_label.set_fontsize(9)
+        cbar.set_label(ndcm_labels['cbar_label'], fontsize=9, labelpad=4)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'noise_dropout_colormae.{ext}'
             fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
             print(f'Saved {path.resolve()}')
         plt.close(fig)
