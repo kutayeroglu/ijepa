@@ -33,6 +33,7 @@ from src.masks.multiblock import MaskCollator as MBMaskCollator
 from src.masks.multinoise import MaskCollator as NoiseMaskCollator
 from src.masks.ng_multiblock import MaskCollator as NGMBMaskCollator
 from src.masks.quadrantnoise import MaskCollator as QuadrantNoiseMaskCollator
+from src.masks.random import MaskCollator as RandomMaskCollator
 from src.masks.utils import apply_masks
 from src.utils.distributed import init_distributed, AllReduce
 from src.utils.logging import CSVLogger, gpu_timer, grad_logger, AverageMeter
@@ -113,7 +114,8 @@ def main(args, resume_preempt=False):
     num_pred_masks = args["mask"]["num_pred_masks"]  # number of target blocks
     pred_mask_scale = args["mask"]["pred_mask_scale"]  # scale of target blocks
     aspect_ratio = args["mask"]["aspect_ratio"]  # aspect ratio of target blocks
-    mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | multinoise | quadrantnoise | ng_multiblock
+    mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | multinoise | quadrantnoise | ng_multiblock | random
+    mask_ratio = args["mask"].get("mask_ratio", (0.4, 0.6))
     green_noise_data_path = args["mask"].get("green_noise_data_path", None)  # path to color noise patterns
     color_mask_ratio = args["mask"].get("color_mask_ratio", 0.15)
     enc_drop_order = args["mask"].get("enc_drop_order", "lowest")
@@ -332,7 +334,13 @@ def main(args, resume_preempt=False):
         )
 
     # -- make data transforms
-    if mask_type == "multinoise":
+    if mask_type == "random":
+        mask_collator = RandomMaskCollator(
+            input_size=crop_size,
+            patch_size=patch_size,
+            ratio=mask_ratio,
+        )
+    elif mask_type == "multinoise":
         if green_noise_data_path is None:
             raise ValueError("green_noise_data_path must be specified when using multinoise mask type")
         mask_collator = NoiseMaskCollator(
