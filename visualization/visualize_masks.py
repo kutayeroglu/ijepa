@@ -27,7 +27,9 @@ set PYTHONPATH so that the imports resolve::
 
 Multinoise (default)::
 
-    python visualization/visualize_masks.py --image_path photo.jpg
+    python visualization/visualize_masks.py \
+        --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz
 
 Multiblock::
 
@@ -936,7 +938,7 @@ def main():
                         help='Path to color-noise .npz file (multinoise only)')
     parser.add_argument('--output_dir', type=str, default=None,
                         help='Output directory; defaults to '
-                             'visualization/<timestamp>_<mask_type>_seed<N>/')
+                             'visualization/<timestamp>_<figure>_seed<N>/')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--input_size', type=int, default=224)
     parser.add_argument('--patch_size', type=int, default=16)
@@ -1003,7 +1005,7 @@ def main():
     if args.output_dir is None:
         script_dir = Path(__file__).resolve().parent
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        out_dir = script_dir / f'{stamp}_{args.mask_type}_seed{args.seed}'
+        out_dir = script_dir / f'{stamp}_{args.figure}_seed{args.seed}'
     else:
         out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
