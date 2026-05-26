@@ -236,6 +236,8 @@ def localized_block_size_labels(turkish: bool):
             'row_ar': 'En/boy oranı şekli belirler',
             'caption': ('Hedef bloğu: aspect_ratio ∈ (0.75, 1.5);  '
                         'bağlam bloğu: aspect_ratio = 1.0 (kare).'),
+            'sample_title': ('Örneklenen yapılandırma\n'
+                               r'$n_{{\mathrm{{pred}}}}$ = {n} hedef'),
         }
     return {
         'title_fmt': ('scale = {s:.2f}, ar = {ar:.2f}\n'
@@ -244,6 +246,8 @@ def localized_block_size_labels(turkish: bool):
         'row_ar': 'Aspect ratio controls shape',
         'caption': ('Target block: aspect_ratio ∈ (0.75, 1.5);  '
                     'context block: aspect_ratio = 1.0 (square).'),
+        'sample_title': ('Sampled configuration\n'
+                           r'$n_{{\mathrm{{pred}}}}$ = {n} targets'),
     }
 
 
@@ -1233,12 +1237,19 @@ def main():
         grid_h = grid_w = args.input_size // ps
         bs_labels = localized_block_size_labels(args.turkish)
 
-        fig, axes = plt.subplots(2, 3, figsize=(11, 7.6))
+        fig = plt.figure(figsize=(12.5, 7.6))
+        gs = fig.add_gridspec(
+            2, 4, width_ratios=[1, 1, 1, 0.82], wspace=0.06, hspace=0.18)
+        sweep_axes = np.array([
+            [fig.add_subplot(gs[r, c]) for c in range(3)]
+            for r in range(2)
+        ])
+        ax_sample = fig.add_subplot(gs[:, 3])
 
         for col, s in enumerate(args.scale_sweep):
             h, w = compute_block_hw(grid_h, grid_w, s, 1.0)
-            draw_block_panel(axes[0, col], image, ps, h, w)
-            axes[0, col].set_title(
+            draw_block_panel(sweep_axes[0, col], image, ps, h, w)
+            sweep_axes[0, col].set_title(
                 bs_labels['title_fmt'].format(
                     s=s, ar=1.0, h=h, w=w, n=h * w),
                 fontsize=10, pad=4)
@@ -1246,29 +1257,60 @@ def main():
         s_fixed = args.fixed_scale_for_ar
         for col, ar in enumerate(args.ar_sweep):
             h, w = compute_block_hw(grid_h, grid_w, s_fixed, ar)
-            draw_block_panel(axes[1, col], image, ps, h, w)
-            axes[1, col].set_title(
+            draw_block_panel(sweep_axes[1, col], image, ps, h, w)
+            sweep_axes[1, col].set_title(
                 bs_labels['title_fmt'].format(
                     s=s_fixed, ar=ar, h=h, w=w, n=h * w),
                 fontsize=10, pad=4)
 
-        axes[0, 0].text(
+        ctx_mask, target_masks = generate_masks(
+            'multiblock',
+            input_size=args.input_size, patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            npred=args.npred, min_keep=args.min_keep, seed=args.seed)
+        dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+        _draw_grid_lines(ax_sample, dimmed, ps)
+        ctx_rgba = (0.16, 0.50, 0.73, 0.50)
+        _add_per_patch_overlay(
+            ax_sample, ps, ctx_mask.numpy().astype(bool), ctx_rgba)
+        targets = []
+        for tm in target_masks:
+            idx = np.argwhere(tm.numpy().astype(bool))
+            if len(idx):
+                rows, cols = idx[:, 0], idx[:, 1]
+                top, left = int(rows.min()), int(cols.min())
+                targets.append((top, left,
+                                int(rows.max()) - top + 1,
+                                int(cols.max()) - left + 1))
+        target_colors = ['#e74c3c', '#27ae60', '#f1c40f', '#9b59b6',
+                         '#1abc9c', '#e67e22']
+        for i, rect in enumerate(targets):
+            _add_block_outlines(
+                ax_sample, ps, [rect],
+                color=target_colors[i % len(target_colors)],
+                labels=[f'T{i + 1}'])
+        ax_sample.set_axis_off()
+        ax_sample.set_title(
+            bs_labels['sample_title'].format(n=args.npred),
+            fontsize=10, pad=4)
+
+        sweep_axes[0, 0].text(
             -0.06, 0.5, bs_labels['row_scale'],
-            transform=axes[0, 0].transAxes,
+            transform=sweep_axes[0, 0].transAxes,
             va='center', ha='right',
             fontsize=12, fontweight='bold', rotation=90, color='#2c3e50')
-        axes[1, 0].text(
+        sweep_axes[1, 0].text(
             -0.06, 0.5, bs_labels['row_ar'],
-            transform=axes[1, 0].transAxes,
+            transform=sweep_axes[1, 0].transAxes,
             va='center', ha='right',
             fontsize=12, fontweight='bold', rotation=90, color='#2c3e50')
 
         fig.text(0.5, 0.02, bs_labels['caption'],
                  ha='center', fontsize=10, style='italic', color='#34495e')
 
-        plt.subplots_adjust(wspace=0.06, hspace=0.18,
-                            left=0.06, right=0.99,
-                            top=0.94, bottom=0.08)
+        plt.subplots_adjust(left=0.06, right=0.99, top=0.94, bottom=0.08)
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic2_block_size.{ext}'
