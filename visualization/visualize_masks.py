@@ -153,6 +153,19 @@ from torchvision import transforms as T
 
 from src.masks.multiblock import MaskCollator as MultiblockCollator
 from src.masks.multinoise import MaskCollator as MultinoiseCollator, NormalizeBySliceMax
+from visualization.labels import (
+    localized_block_size_labels,
+    localized_carving_extended_labels,
+    localized_carving_labels,
+    localized_grid_labels,
+    localized_labels,
+    localized_mask_type_label,
+    localized_noise_dropout_colormae_labels,
+    localized_noise_dropout_labels,
+    localized_noise_transform_labels,
+    localized_placement_labels,
+    patch_grid_annotation_text,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -160,10 +173,6 @@ from src.masks.multinoise import MaskCollator as MultinoiseCollator, NormalizeBy
 # ---------------------------------------------------------------------------
 
 DIM_ALPHA = 0.40
-TR_MASK_TYPE_LABELS = {
-    'multinoise': 'Çoklu Gürültü',
-    'multiblock': 'Çoklu Blok',
-}
 
 
 def _indices_to_2d(mask_1d: torch.Tensor, H: int, W: int) -> torch.Tensor:
@@ -198,59 +207,6 @@ def load_image(path: str, size: int) -> np.ndarray:
     return np.array(img)
 
 
-def localized_labels(turkish: bool):
-    """Return panel labels for the selected output language."""
-    if turkish:
-        return {
-            'original': 'Girdi',
-            'context': 'Bağlam',
-            'target_prefix': 'Hedef',
-        }
-    return {
-        'original': 'Original',
-        'context': 'Context',
-        'target_prefix': 'Target',
-    }
-
-
-def localized_grid_labels(turkish: bool):
-    """Return panel labels for the patch-grid figure (Mechanic 1)."""
-    if turkish:
-        return {
-            'input': 'Girdi görüntüsü',
-            'grid_title_fmt': '{n}×{n} yama ızgarası',
-        }
-    return {
-        'input': 'Input image',
-        'grid_title_fmt': '{n}×{n} patch grid',
-    }
-
-
-def localized_block_size_labels(turkish: bool):
-    """Return panel labels for the block-size figure (Mechanic 2)."""
-    if turkish:
-        return {
-            'title_fmt': ('ölçek = {s:.2f}, en/boy = {ar:.2f}\n'
-                          '(y, g) = ({h}, {w}), {n} yama'),
-            'row_scale': 'Ölçek alanı belirler',
-            'row_ar': 'En/boy oranı şekli belirler',
-            'caption': ('Hedef bloğu: aspect_ratio ∈ (0.75, 1.5);  '
-                        'bağlam bloğu: aspect_ratio = 1.0 (kare).'),
-            'sample_title': ('Örneklenen yapılandırma\n'
-                               r'$n_{{\mathrm{{pred}}}}$ = {n} hedef'),
-        }
-    return {
-        'title_fmt': ('scale = {s:.2f}, ar = {ar:.2f}\n'
-                      '(h, w) = ({h}, {w}), {n} patches'),
-        'row_scale': 'Scale controls area',
-        'row_ar': 'Aspect ratio controls shape',
-        'caption': ('Target block: aspect_ratio ∈ (0.75, 1.5);  '
-                    'context block: aspect_ratio = 1.0 (square).'),
-        'sample_title': ('Sampled configuration\n'
-                           r'$n_{{\mathrm{{pred}}}}$ = {n} targets'),
-    }
-
-
 def _draw_grid_lines(ax, image: np.ndarray, patch_size: int,
                      color: str = 'white', lw: float = 0.6,
                      alpha: float = 0.85):
@@ -279,8 +235,7 @@ def draw_patch_grid_panel(ax, image: np.ndarray, patch_size: int,
         patch_size, patch_size,
         fill=False, edgecolor='red', linewidth=2.0))
 
-    text = (f'1 yama\n= {patch_size}×{patch_size} piksel'
-            if turkish else f'1 patch\n= {patch_size}×{patch_size} px')
+    text = patch_grid_annotation_text(patch_size, turkish)
     ax.annotate(
         text,
         xy=((c + 1) * patch_size, (r + 1) * patch_size),
@@ -335,29 +290,6 @@ def draw_block_panel(ax, image: np.ndarray, patch_size: int,
         facecolor=color, alpha=fill_alpha,
         edgecolor=color, linewidth=2.0))
     ax.set_axis_off()
-
-
-def localized_placement_labels(turkish: bool):
-    """Return panel labels for the placement figure (Mechanic 3)."""
-    if turkish:
-        return {
-            'block_title_fmt': 'Blok şekli: (y, g) = ({h}, {w})',
-            'region_title': 'Geçerli köşe bölgesi',
-            'region_caption_fmt': ('Geçerli sol-üst köşeler:\n'
-                                   '(Y−y)×(G−g) = {a}×{b} = {n} konum'),
-            'single_title': 'Tek örnekleme',
-            'single_caption_fmt': 'köşe = ({r}, {c})',
-            'multi_title_fmt': '{n} adet düzgün örnek',
-        }
-    return {
-        'block_title_fmt': 'Block shape: (h, w) = ({h}, {w})',
-        'region_title': 'Valid corner region',
-        'region_caption_fmt': ('Valid top-left corners:\n'
-                               '(H−h)×(W−w) = {a}×{b} = {n} positions'),
-        'single_title': 'One sample',
-        'single_caption_fmt': 'corner = ({r}, {c})',
-        'multi_title_fmt': '{n} uniform samples',
-    }
 
 
 def _add_valid_region_patch(ax, patch_size: int,
@@ -461,40 +393,6 @@ def sample_placements(grid_h: int, grid_w: int,
         left = int(torch.randint(0, high_w, (1,), generator=generator).item())
         placements.append((top, left))
     return placements
-
-
-def localized_carving_labels(turkish: bool):
-    """Return panel labels for the carving figure (  4)."""
-    if turkish:
-        return {
-            'targets': '(a) Hedef bloklar',
-            'acceptable': '(b) Kabul edilebilir bölge',
-            'candidate': '(c) Aday bağlam bloku',
-            'final': '(d) Yontulmuş nihai bağlam',
-            'caption': ('nihai = aday  ⊙  ⋂ᵢ tümleyen(Tᵢ)  '
-                        '=  aday  ∩  kabul edilebilir bölge'),
-        }
-    return {
-        'targets': '(a) Target blocks',
-        'acceptable': '(b) Acceptable region (complement)',
-        'candidate': '(c) Candidate context block',
-        'final': '(d) Final carved context',
-        'caption': ('final = candidate  ⊙  ⋂ᵢ complement(Tᵢ)  '
-                    '=  candidate  ∩  acceptable region'),
-    }
-
-
-def localized_carving_extended_labels(turkish: bool):
-    """Left-side row labels for the two-row carving_extended figure."""
-    if turkish:
-        return {
-            'side_multiblock': 'Çoklu blok',
-            'side_multinoise': 'Çoklu gürültü',
-        }
-    return {
-        'side_multiblock': 'Multiblock',
-        'side_multinoise': 'Multinoise',
-    }
 
 
 def compute_multinoise_carving_state(
@@ -779,58 +677,6 @@ def draw_final_panel(ax, image: np.ndarray, patch_size: int,
     ax.set_axis_off()
 
 
-def localized_noise_dropout_labels(turkish: bool):
-    """Return panel labels for the noise-dropout figure (Mechanic 3.5)."""
-    if turkish:
-        return {
-            'block_title_fmt': 'Blok şekli: (y, g) = ({h}, {w})',
-            'sampled': '(a) Örneklenen blok',
-            'noise_field': '(b) Renkli gürültü alanı',
-            'thresholded_fmt': '(c) Gürültü eşikleme sonrası ({pct:.0f}% düşürüldü)',
-            'cbar_label': 'Gürültü değeri',
-            'cbar_low': 'düşük',
-            'cbar_high': 'yüksek',
-            'cbar_dropped': 'düşürüldü',
-            'cbar_kept': 'tutuldu',
-        }
-    return {
-        'block_title_fmt': 'Block shape: (h, w) = ({h}, {w})',
-        'sampled': '(a) Sampled block',
-        'noise_field': '(b) Colored noise field',
-        'thresholded_fmt': '(c) After noise thresholding ({pct:.0f}% dropped)',
-        'cbar_label': 'Noise value',
-        'cbar_low': 'low',
-        'cbar_high': 'high',
-        'cbar_dropped': 'dropped',
-        'cbar_kept': 'kept',
-    }
-
-
-def localized_noise_dropout_colormae_labels(turkish: bool):
-    """Return panel labels for the noise-dropout ColormAE-style full-grid figure."""
-    if turkish:
-        return {
-            'image_grid': '(a) Girdi + yama tablosu',
-            'noise_field': '(b) Renkli gürültü (tüm bölgeler)',
-            'thresholded_fmt': '(c) En düşük gürültülü yamaların %{pct:.0f}\'i düşürüldü',
-            'cbar_label': 'Gürültü değeri',
-            'cbar_low': 'düşük',
-            'cbar_high': 'yüksek',
-            'cbar_dropped': 'düşürüldü',
-            'cbar_kept': 'tutuldu',
-        }
-    return {
-        'image_grid': '(a) Input + patch grid',
-        'noise_field': '(b) Colored noise field (full image)',
-        'thresholded_fmt': '(c) Lowest-noise {pct:.0f}% of patches dropped',
-        'cbar_label': 'Noise value',
-        'cbar_low': 'low',
-        'cbar_high': 'high',
-        'cbar_dropped': 'dropped',
-        'cbar_kept': 'kept',
-    }
-
-
 def apply_noise_threshold(block_mask_2d: np.ndarray,
                           noise_grid: np.ndarray,
                           ratio: float,
@@ -936,39 +782,6 @@ def draw_noise_thresholded_panel(ax, image: np.ndarray, patch_size: int,
     ax.set_axis_off()
 
 
-def localized_noise_transform_labels(turkish: bool):
-    """Return per-panel step titles for the noise-transform figure (Mechanic 3.6).
-
-    Five titles correspond to:
-      0. raw noise context (before any transform)
-      1. after RandomCrop
-      2. after RandomHorizontalFlip
-      3. after RandomVerticalFlip
-      4. after NormalizeBySliceMax
-    """
-    if turkish:
-        return {
-            'step_titles': [
-                'Ham gürültü',
-                '+ RandomCrop({h}\u00d7{w})',
-                '+ RandomHorizontalFlip',
-                '+ RandomVerticalFlip',
-                '+ NormalizeBySliceMax',
-            ],
-            'flip_caption': 'p=0.5 ile uygulanır',
-        }
-    return {
-        'step_titles': [
-            'Raw noise',
-            '+ RandomCrop({h}\u00d7{w})',
-            '+ RandomHorizontalFlip',
-            '+ RandomVerticalFlip',
-            '+ NormalizeBySliceMax',
-        ],
-        'flip_caption': 'applied with p=0.5',
-    }
-
-
 def _draw_noise_on_image(ax, image: np.ndarray, noise_grid: np.ndarray,
                           patch_size: int, cmap: str = 'Greens',
                           alpha: float = 0.55):
@@ -999,13 +812,6 @@ def _draw_transform_text_panel(ax, transform_names: list[str], header: str,
                       edgecolor='none', boxstyle='round,pad=0.7'),
             linespacing=1.8,
             fontfamily='monospace')
-
-
-def localized_mask_type_label(mask_type: str, turkish: bool) -> str:
-    """Return display label for the selected mask type."""
-    if turkish:
-        return TR_MASK_TYPE_LABELS.get(mask_type, mask_type)
-    return mask_type.capitalize()
 
 
 def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
