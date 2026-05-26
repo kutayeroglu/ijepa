@@ -1,5 +1,10 @@
 """English / Turkish strings for mask visualization figures."""
 
+EN_MASK_TYPE_LABELS = {
+    'multinoise': 'multi-noise',
+    'multiblock': 'multi-block',
+}
+
 TR_MASK_TYPE_LABELS = {
     'multinoise': 'Çoklu Gürültü',
     'multiblock': 'Çoklu Blok',
@@ -212,4 +217,4 @@ def localized_mask_type_label(mask_type: str, turkish: bool) -> str:
     """Return display label for the selected mask type."""
     if turkish:
         return TR_MASK_TYPE_LABELS.get(mask_type, mask_type)
-    return mask_type.capitalize()
+    return EN_MASK_TYPE_LABELS.get(mask_type, mask_type)
