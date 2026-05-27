@@ -104,19 +104,20 @@ def main(args, resume_preempt=False):
     # --
 
     # -- MASK
-    allow_overlap = args["mask"][
-        "allow_overlap"
-    ]  # whether to allow overlap b/w context and target blocks
-    patch_size = args["mask"]["patch_size"]  # patch-size for model training
-    num_enc_masks = args["mask"]["num_enc_masks"]  # number of context blocks
-    min_keep = args["mask"]["min_keep"]  # min number of patches in context block
-    enc_mask_scale = args["mask"]["enc_mask_scale"]  # scale of context blocks
-    num_pred_masks = args["mask"]["num_pred_masks"]  # number of target blocks
-    pred_mask_scale = args["mask"]["pred_mask_scale"]  # scale of target blocks
-    aspect_ratio = args["mask"]["aspect_ratio"]  # aspect ratio of target blocks
     mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | multinoise | quadrantnoise | ng_multiblock | random
+    patch_size = args["mask"]["patch_size"]  # patch-size for model training
+    # multiblock / noise mask knobs (optional for mask_type=random)
+    allow_overlap = args["mask"].get(
+        "allow_overlap", False
+    )  # whether to allow overlap b/w context and target blocks
+    num_enc_masks = args["mask"].get("num_enc_masks", 1)  # number of context blocks
+    min_keep = args["mask"].get("min_keep", 10)  # min number of patches in context block
+    enc_mask_scale = args["mask"].get("enc_mask_scale", (0.85, 1.0))  # scale of context blocks
+    num_pred_masks = args["mask"].get("num_pred_masks", 4)  # number of target blocks
+    pred_mask_scale = args["mask"].get("pred_mask_scale", (0.15, 0.2))  # scale of target blocks
+    aspect_ratio = args["mask"].get("aspect_ratio", (0.75, 1.5))  # aspect ratio of target blocks
     mask_ratio = args["mask"].get("mask_ratio", (0.4, 0.6))
-    green_noise_data_path = args["mask"].get("green_noise_data_path", None)  # path to color noise patterns
+    noise_data_path = args["mask"].get("noise_data_path", None)  # path to color noise patterns
     color_mask_ratio = args["mask"].get("color_mask_ratio", 0.15)
     enc_drop_order = args["mask"].get("enc_drop_order", "lowest")
     pred_drop_order = args["mask"].get("pred_drop_order", "lowest")
@@ -341,8 +342,8 @@ def main(args, resume_preempt=False):
             ratio=mask_ratio,
         )
     elif mask_type == "multinoise":
-        if green_noise_data_path is None:
-            raise ValueError("green_noise_data_path must be specified when using multinoise mask type")
+        if noise_data_path is None:
+            raise ValueError("noise_data_path must be specified when using multinoise mask type")
         mask_collator = NoiseMaskCollator(
             input_size=crop_size,
             patch_size=patch_size,
@@ -354,15 +355,15 @@ def main(args, resume_preempt=False):
             min_keep=min_keep,
             allow_overlap=allow_overlap,
             debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
-            color_noise_path=green_noise_data_path,
+            color_noise_path=noise_data_path,
             color_mask_ratio=color_mask_ratio,
             enc_drop_order=enc_drop_order,
             pred_drop_order=pred_drop_order,
         )
     elif mask_type == "quadrantnoise":
-        if green_noise_data_path is None:
+        if noise_data_path is None:
             raise ValueError(
-                "green_noise_data_path must be specified when using quadrantnoise mask type"
+                "noise_data_path must be specified when using quadrantnoise mask type"
             )
         mask_collator = QuadrantNoiseMaskCollator(
             input_size=crop_size,
@@ -375,15 +376,15 @@ def main(args, resume_preempt=False):
             min_keep=min_keep,
             allow_overlap=allow_overlap,
             debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
-            color_noise_path=green_noise_data_path,
+            color_noise_path=noise_data_path,
             color_mask_ratio=color_mask_ratio,
             enc_drop_order=enc_drop_order,
             pred_drop_order=pred_drop_order,
         )
     elif mask_type == "ng_multiblock":
-        if green_noise_data_path is None:
+        if noise_data_path is None:
             raise ValueError(
-                "green_noise_data_path must be specified when using ng_multiblock mask type"
+                "noise_data_path must be specified when using ng_multiblock mask type"
             )
         mask_collator = NGMBMaskCollator(
             input_size=crop_size,
@@ -396,7 +397,7 @@ def main(args, resume_preempt=False):
             min_keep=min_keep,
             allow_overlap=allow_overlap,
             debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
-            color_noise_path=green_noise_data_path,
+            color_noise_path=noise_data_path,
             score_mode=score_mode,
             enc_bias=enc_bias,
             pred_bias=pred_bias,

@@ -32,7 +32,7 @@ mask:
   - 0.15
   - 0.2
   mask_type: ng_multiblock
-  green_noise_data_path: /mnt/green_noise_data_3072.npz
+  noise_data_path: /mnt/green_noise_data_3072.npz
   score_mode: boxsum
   enc_bias: high
   pred_bias: high
