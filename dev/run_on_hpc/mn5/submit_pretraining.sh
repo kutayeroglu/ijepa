@@ -15,6 +15,11 @@
 #   ./dev/run_on_hpc/mn5/submit_pretraining.sh \
 #       dev/run_on_hpc/mn5/pretraining/pt100_mn50_vitb.sh \
 #       PYTHONUNBUFFERED=1
+#
+#   ./dev/run_on_hpc/mn5/submit_pretraining.sh \
+#       dev/run_on_hpc/mn5/pretraining/pt100_mn50_vitb.sh \
+#       CONFIG_PATH=configs/ablation/noise_color/red-bal_mn_vitb.yaml \
+#       NOISE_FILENAME=red_noise_data_3072.npz
 
 set -euo pipefail
 
@@ -37,6 +42,11 @@ Examples:
   ./dev/run_on_hpc/mn5/submit_pretraining.sh \
       dev/run_on_hpc/mn5/pretraining/pt100_mn50_vitb.sh \
       PYTHONUNBUFFERED=1
+
+  ./dev/run_on_hpc/mn5/submit_pretraining.sh \
+      dev/run_on_hpc/mn5/pretraining/pt100_mn50_vitb.sh \
+      CONFIG_PATH=configs/ablation/noise_color/red-bal_mn_vitb.yaml \
+      NOISE_FILENAME=red_noise_data_3072.npz
 EOF
 }
 
