@@ -29,6 +29,7 @@ import torch.multiprocessing as mp
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel
 
+from src.masks.blockwise import MaskCollator as BlockwiseMaskCollator
 from src.masks.multiblock import MaskCollator as MBMaskCollator
 from src.masks.multinoise import MaskCollator as NoiseMaskCollator
 from src.masks.ng_multiblock import MaskCollator as NGMBMaskCollator
@@ -104,7 +105,7 @@ def main(args, resume_preempt=False):
     # --
 
     # -- MASK
-    mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | multinoise | quadrantnoise | ng_multiblock | random
+    mask_type = args["mask"].get("mask_type", "multiblock")  # multiblock | blockwise | multinoise | quadrantnoise | ng_multiblock | random
     patch_size = args["mask"]["patch_size"]  # patch-size for model training
     # multiblock / noise mask knobs (optional for mask_type=random)
     allow_overlap = args["mask"].get(
@@ -402,6 +403,19 @@ def main(args, resume_preempt=False):
             enc_bias=enc_bias,
             pred_bias=pred_bias,
             noise_temperature=noise_temperature,
+        )
+    elif mask_type == "blockwise":
+        mask_collator = BlockwiseMaskCollator(
+            input_size=crop_size,
+            patch_size=patch_size,
+            enc_mask_scale=enc_mask_scale,
+            pred_mask_scale=pred_mask_scale,
+            aspect_ratio=aspect_ratio,
+            nenc=num_enc_masks,
+            npred=num_pred_masks,
+            min_keep=min_keep,
+            allow_overlap=allow_overlap,
+            debug_log=os.environ.get("LOG_MULTIBLOCK_DEBUG", "") == "1",
         )
     else:
         mask_collator = MBMaskCollator(
