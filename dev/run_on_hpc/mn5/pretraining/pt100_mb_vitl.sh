@@ -1,52 +1,44 @@
 #!/bin/bash
-#SBATCH --job-name=ptMb_vL
+#SBATCH --job-name=ptmb_vl
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91 
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_pt_mbVitL.out
-#SBATCH --error=%j_pt_mbVitL.err
+#SBATCH --output=%j_pt_mb_vitl.out
+#SBATCH --error=%j_pt_mb_vitl.err
 #SBATCH --chdir=.
 
 set -e
-
-# --- Environment Setup ---
-cd "$HOME/ijepa"
 export OMP_NUM_THREADS=$SLURM_CPUS_PER_TASK
+cd "$HOME/ijepa"
 
-# Remove trailing slashes for consistency
-SCRATCH_DIR="/gpfs/scratch/etur91"
-REAL_DATA_PATH="/gpfs/projects/etur91/boga222803/datasets/imagenet"
-REAL_LOG_PATH="$SCRATCH_DIR/logs"
-LOCAL_DATA_DIR="$TMPDIR/imagenet"
-SCRIPT_PATH="dev/run_on_hpc/mn5/pretraining/pt100_mb_vitl.sh"
-CONFIG_PATH="configs/balon_mblock_vitl.yaml"
-RUN_TAG="balon_mblock_vitl"
-RUN_ID="${SLURM_JOB_ID:-manual}_${RUN_TAG}"
-RUN_OUTPUT_DIR="$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG/runs/$RUN_ID"
+# -- Script --
+PROJECT_ROOT="$HOME/ijepa"
+PROJECTS_BASE="/gpfs/projects/etur91/boga222803"
+SCRIPT_PATH="$(realpath --relative-to="$PROJECT_ROOT" "$0")"
+source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
-export IJEPA_RUN_ID="$RUN_ID"
 
-source "$HOME/ijepa/dev/run_on_hpc/mn5/common.sh"
+# -- Config --
+CONFIG_NAME="bal_mb_vitl" # TODO
+CONFIG_PATH="configs/ablation/backbone_scaling/${CONFIG_NAME}.yaml"
 
-mkdir -p "$REAL_LOG_PATH/ijepa/pretraining"
-mkdir -p "$REAL_LOG_PATH/ijepa/pretraining/$RUN_TAG"
-mkdir -p "$RUN_OUTPUT_DIR"
+# -- Logs -- 
+SCRATCH_DIR="/gpfs/scratch/etur91"
+REAL_LOG_PATH="$SCRATCH_DIR/logs"
+
+# -- Data -- 
+REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
+LOCAL_DATA_DIR="$TMPDIR/imagenet"
+
 mkdir -p "$LOCAL_DATA_DIR/train"
 
-# --- Data Staging (The bottleneck) ---
 echo "--- Staging and Extracting Data to Local SSD ($TMPDIR) ---"
-
-# Extract Main Train Tar
-echo "Extracting main train tar from GPFS..."
 tar -xf "$REAL_DATA_PATH/ILSVRC2012_img_train.tar" -C "$LOCAL_DATA_DIR/train"
 
-# Extract sub-tars (This takes a long time!)
-echo "Extracting class sub‑tars in parallel..."
 cd "$LOCAL_DATA_DIR/train"
-# find . -name "*.tar" | xargs -I {} sh -c "mkdir -p \${1%.tar} && tar -xf \$1 -C \${1%.tar} && rm \$1" -- {}
 find . -name "*.tar" -print0 | xargs -0 -P 8 -I {} sh -c '
     dir="${1%.tar}"
     mkdir -p "$dir"
@@ -57,9 +49,9 @@ cd -
 
 echo "--- Data extraction complete ---"
 
-# --- Container Execution ---
+# -- Container execution --
 BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
-SIF_IMAGE="/gpfs/projects/etur91/boga222803/ijepa-env.sif"
+SIF_IMAGE="$PROJECTS_BASE/ijepa-env.sif"
 
 CMD_ARGS=(
     --fname "$CONFIG_PATH"
