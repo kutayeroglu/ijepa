@@ -1,13 +1,13 @@
 """English / Turkish strings for mask visualization figures."""
 
 EN_MASK_TYPE_LABELS = {
-    'multinoise': 'multi-noise',
-    'multiblock': 'multi-block',
+    'multinoise': 'Multi-noise',
+    'multiblock': 'Multi-block',
 }
 
 TR_MASK_TYPE_LABELS = {
-    'multinoise': 'Çoklu Gürültü',
-    'multiblock': 'Çoklu Blok',
+    'multinoise': 'Çoklu-Gürültü',
+    'multiblock': 'Çoklu-Blok',
 }
 
 
@@ -112,19 +112,6 @@ def localized_carving_labels(turkish: bool):
         'final': '(d) Final carved context',
         'caption': ('final = candidate  ⊙  ⋂ᵢ complement(Tᵢ)  '
                     '=  candidate  ∩  acceptable region'),
-    }
-
-
-def localized_carving_extended_labels(turkish: bool):
-    """Left-side row labels for the two-row carving_extended figure."""
-    if turkish:
-        return {
-            'side_multiblock': 'Çoklu blok',
-            'side_multinoise': 'Çoklu gürültü',
-        }
-    return {
-        'side_multiblock': 'Multiblock',
-        'side_multinoise': 'Multinoise',
     }
 
 

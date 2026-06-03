@@ -157,7 +157,6 @@ from src.masks.multiblock import MaskCollator as MultiblockCollator
 from src.masks.multinoise import MaskCollator as MultinoiseCollator, NormalizeBySliceMax
 from visualization.labels import (
     localized_block_size_labels,
-    localized_carving_extended_labels,
     localized_carving_labels,
     localized_grid_labels,
     localized_labels,
@@ -1512,7 +1511,6 @@ def main():
             plt.close(fig)
             return
 
-        ext_labels = localized_carving_extended_labels(args.turkish)
         coll = MultinoiseCollator(
             input_size=(args.input_size, args.input_size),
             patch_size=ps,
@@ -1534,7 +1532,7 @@ def main():
                 pred_drop_order=args.pred_drop_order,
                 enc_drop_order=args.enc_drop_order))
 
-        fig, axes = plt.subplots(2, 4, figsize=(15, 8.6))
+        fig, axes = plt.subplots(2, 4, figsize=(15, 7.2))
 
         draw_targets_only_panel(axes[0, 0], image, ps, targets)
         axes[0, 0].set_title(cv_labels['targets'], fontsize=11, pad=4)
@@ -1568,13 +1566,15 @@ def main():
                  ha='center', fontsize=9, style='italic', color='#34495e')
 
         side_kw = dict(
-            rotation=90, va='center', ha='center',
-            fontsize=20, fontweight='bold', color='#2c3e50')
-        fig.text(0.035, 0.705, ext_labels['side_multiblock'], **side_kw)
-        fig.text(0.035, 0.315, ext_labels['side_multinoise'], **side_kw)
+            rotation=90, va='center', ha='right',
+            fontsize=16, fontweight='semibold', color='#2c3e50')
+        fig.text(0.078, 0.72,
+                 localized_mask_type_label('multiblock', args.turkish), **side_kw)
+        fig.text(0.078, 0.34,
+                 localized_mask_type_label('multinoise', args.turkish), **side_kw)
 
-        plt.subplots_adjust(wspace=0.06, hspace=0.28,
-                            left=0.09, right=0.99, top=0.90, bottom=0.11)
+        plt.subplots_adjust(wspace=0.06, hspace=0.12,
+                            left=0.085, right=0.99, top=0.92, bottom=0.09)
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic4_carving_extended.{ext}'
