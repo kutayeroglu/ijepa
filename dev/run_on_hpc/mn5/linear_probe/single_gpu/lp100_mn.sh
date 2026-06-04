@@ -72,7 +72,7 @@ CMD_ARGS=(
     --model_path "$CONTAINER_MODEL_PATH"
     --model_name vit_base # TODO
     --patch_size 16
-    --batch_size 1024 
+    --batch_size 1024 # TODO
     --learning_rate 0.00625
     --weight_decay 0.0005
     --num_workers 10

@@ -70,7 +70,7 @@ CMD_ARGS=(
     --dataset_dir /mnt/data/imagenet
     --val_dir /mnt/data/imagenet/val
     --model_path "$CONTAINER_MODEL_PATH"
-    --model_name vit_large
+    --model_name vit_large # TODO, needs other changes up-top
     --patch_size 16
     --batch_size 1024
     --learning_rate 0.00625
