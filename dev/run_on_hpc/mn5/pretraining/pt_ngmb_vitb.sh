@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=dpt-mn50
+#SBATCH --job-name=pt-ngmb
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
-#SBATCH --time=18:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_pt_mid-mn50_vitb.out
-#SBATCH --error=%j_pt_mid-mn50_vitb.err
+#SBATCH --output=%j_pt100_ngmb_vitb.out
+#SBATCH --error=%j_pt100_ngmb_vitb.err
 #SBATCH --chdir=.
 
 set -e
@@ -22,14 +22,14 @@ source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
 # -- Config --
-CONFIG_NAME="mid_mn50_vitb" # TODO
-CONFIG_PATH="configs/midas/${CONFIG_NAME}.yaml"
+CONFIG_NAME="bal_ngmb_vitb"
+CONFIG_PATH="configs/${CONFIG_NAME}.yaml"
 
-# -- Logs -- 
+# -- Logs --
 SCRATCH_DIR="/gpfs/scratch/etur91"
 REAL_LOG_PATH="$SCRATCH_DIR/logs"
 
-# -- Data -- 
+# -- Data --
 NOISE_FILENAME="green_noise_data_3072.npz"
 NOISE_HOST_PATH="$PROJECTS_BASE/datasets/$NOISE_FILENAME"
 REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"

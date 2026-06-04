@@ -1,8 +1,8 @@
 #!/bin/bash
 #SBATCH --job-name=pt-qn50-vitb
-#SBATCH --qos=acc_debug
+#SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
-#SBATCH --time=02:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
