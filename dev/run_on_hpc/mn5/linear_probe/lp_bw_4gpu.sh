@@ -6,8 +6,8 @@
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_lp100_bw_4gpu.out
-#SBATCH --error=%j_lp100_bw_4gpu.err
+#SBATCH --output=%j_lp_bw_4gpu.out
+#SBATCH --error=%j_lp_bw_4gpu.err
 #SBATCH --chdir=.
 
 set -e

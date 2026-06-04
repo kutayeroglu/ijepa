@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=LpMn40VlBl
+#SBATCH --job-name=LpHrand
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_lp_blue-mn40_vitl.out
-#SBATCH --error=%j_lp_blue-mn40_vitl.err
+#SBATCH --output=%j_lp_random_4gpu.out
+#SBATCH --error=%j_lp_random_4gpu.err
 #SBATCH --chdir=.
 
 set -e
@@ -21,11 +21,12 @@ SCRIPT_PATH="$(realpath --relative-to="$PROJECT_ROOT" "$0")"
 source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
-# -- Config (multinoise ViT-L pretrain: bal_mn40_vitl) --
-CONFIG_TAG="${CONFIG_TAG:-bal_mn40_vitl}"
-PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-41321521_bal_mn40_vitl}"
-CHECKPOINT_SUFFIX="${CHECKPOINT_SUFFIX:-ep100}"
-RUN_ID="${SLURM_JOB_ID:-manual}_lp_mn40_vitl_4gpu"
+# -- Config (random masking pretrain: bal_random_vitb) --
+CONFIG_TAG="${CONFIG_TAG:-bal_random_vitb}"
+# TODO: set to your pretraining run folder name, e.g. 12345678_bal_random_vitb
+PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-00000000_bal_random_vitb}"
+CHECKPOINT_SUFFIX="${CHECKPOINT_SUFFIX:-latest}"
+RUN_ID="${SLURM_JOB_ID:-manual}_lp_random_4gpu"
 
 # -- Logs --
 SCRATCH_DIR="/gpfs/scratch/etur91"
@@ -70,7 +71,7 @@ CMD_ARGS=(
     --dataset_dir /mnt/data/imagenet
     --val_dir /mnt/data/imagenet/val
     --model_path "$CONTAINER_MODEL_PATH"
-    --model_name vit_large
+    --model_name vit_base
     --patch_size 16
     --batch_size 1024
     --learning_rate 0.025
@@ -87,7 +88,7 @@ module purge
 module load singularity/4.1.5
 
 print_run_header
-echo "--- Executing Distributed Linear Probe (4 GPUs, mn40/mn50 multinoise ViT-L checkpoint) ---"
+echo "--- Executing Distributed Linear Probe (4 GPUs, random checkpoint) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
     "$SIF_IMAGE" \

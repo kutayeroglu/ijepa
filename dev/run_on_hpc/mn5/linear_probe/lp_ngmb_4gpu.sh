@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=LpHqn504g
+#SBATCH --job-name=LpHngmb
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_lp100_qn50_4gpu.out
-#SBATCH --error=%j_lp100_qn50_4gpu.err
+#SBATCH --output=%j_lp_ngmb_4gpu.out
+#SBATCH --error=%j_lp_ngmb_4gpu.err
 #SBATCH --chdir=.
 
 set -e
@@ -21,12 +21,12 @@ SCRIPT_PATH="$(realpath --relative-to="$PROJECT_ROOT" "$0")"
 source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
-# -- Config (quadrantnoise pretrain: bal_qn50_vitb) --
-CONFIG_TAG="${CONFIG_TAG:-bal_qn50_vitb}"
-# TODO: set to your pretraining run folder name, e.g. 12345678_bal_qn50_vitb
-PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-00000000_bal_qn50_vitb}"
+# -- Config (ng_multiblock pretrain: bal_ngmb_vitb) --
+CONFIG_TAG="${CONFIG_TAG:-bal_ngmb_vitb}"
+# TODO: set to your pretraining run folder name, e.g. 12345678_bal_ngmb_vitb
+PRETRAINING_RUN_ID="${PRETRAINING_RUN_ID:-00000000_bal_ngmb_vitb}"
 CHECKPOINT_SUFFIX="${CHECKPOINT_SUFFIX:-latest}"
-RUN_ID="${SLURM_JOB_ID:-manual}_lp100_qn50_4gpu"
+RUN_ID="${SLURM_JOB_ID:-manual}_lp_ngmb_4gpu"
 
 # -- Logs --
 SCRATCH_DIR="/gpfs/scratch/etur91"
@@ -88,7 +88,7 @@ module purge
 module load singularity/4.1.5
 
 print_run_header
-echo "--- Executing Distributed Linear Probe (4 GPUs, qn50 checkpoint) ---"
+echo "--- Executing Distributed Linear Probe (4 GPUs, ngmb checkpoint) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
     "$SIF_IMAGE" \
