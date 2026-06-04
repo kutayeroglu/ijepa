@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=ptmb_vl
+#SBATCH --job-name=pt-Gmn40-vl
 #SBATCH --qos=acc_ehpc
-#SBATCH --account=etur91 
+#SBATCH --account=etur91
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_pt_mb_vitl.out
-#SBATCH --error=%j_pt_mb_vitl.err
+#SBATCH --output=%j_pt_green-mn40_vitl.out
+#SBATCH --error=%j_pt_green-mn40_vitl.err
 #SBATCH --chdir=.
 
 set -e
@@ -21,15 +21,17 @@ SCRIPT_PATH="$(realpath --relative-to="$PROJECT_ROOT" "$0")"
 source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
-# -- Config --
-CONFIG_NAME="bal_mb_vitl" # TODO
-CONFIG_PATH="configs/ablation/backbone_scaling/${CONFIG_NAME}.yaml"
+# -- Config (override via submit_pretraining.sh: KEY=VALUE) --
+CONFIG_NAME="${CONFIG_NAME:-green-bal_mn40_vitl}"
+CONFIG_PATH="${CONFIG_PATH:-configs/ablation/backbone_scaling/${CONFIG_NAME}.yaml}"
 
 # -- Logs -- 
 SCRATCH_DIR="/gpfs/scratch/etur91"
 REAL_LOG_PATH="$SCRATCH_DIR/logs"
 
-# -- Data -- 
+# -- Data --
+NOISE_FILENAME="${NOISE_FILENAME:-green_noise_data_3072.npz}"
+NOISE_HOST_PATH="$PROJECTS_BASE/datasets/$NOISE_FILENAME"
 REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
 
@@ -50,7 +52,8 @@ cd -
 echo "--- Data extraction complete ---"
 
 # -- Container execution --
-BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs"
+NOISE_CONTAINER_PATH="/mnt/$NOISE_FILENAME"
+BIND_ARGS="$LOCAL_DATA_DIR:/mnt/data/imagenet,$REAL_LOG_PATH:/mnt/logs,$NOISE_HOST_PATH:$NOISE_CONTAINER_PATH"
 SIF_IMAGE="$PROJECTS_BASE/ijepa-env.sif"
 
 CMD_ARGS=(
@@ -62,7 +65,7 @@ module purge
 module load singularity/4.1.5
 
 print_run_header
-echo "--- Executing I-JEPA (multiblock, vit-large) ---"
+echo "--- Executing I-JEPA (multinoise, vit-large) ---"
 singularity exec --nv \
     --bind "$BIND_ARGS" \
     "$SIF_IMAGE" \
