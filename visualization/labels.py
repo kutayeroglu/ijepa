@@ -5,6 +5,8 @@ EN_MASK_TYPE_LABELS = {
     'multiblock': 'Multi-block',
     'random': 'Random',
     'blockwise': 'Block-wise',
+    'grid': 'Grid',
+    'rasterized': 'Rasterized',
 }
 
 TR_MASK_TYPE_LABELS = {
@@ -12,6 +14,8 @@ TR_MASK_TYPE_LABELS = {
     'multiblock': 'Çoklu-Blok',
     'random': 'Rastgele',
     'blockwise': 'Blok-bazlı',
+    'grid': 'Izgara',
+    'rasterized': 'Çeyreklik',
 }
 
 

@@ -172,6 +172,31 @@ Blockwise mask / complement (training-aligned scales from bal_bw_vitb)::
         --enc_mask_scale 0.85 1.0 \
         --aspect_ratio 0.75 1.5 \
         --seed 42
+
+    # Grid masking (one of every four patches kept as context):
+    python visualization/visualize_masks.py \
+        --figure mask_complement \
+        --mask_type grid \
+        --mask_role context \
+        --image_path photo.jpg
+
+    # Rasterized masking (one quadrant context, three quadrants target):
+    python visualization/visualize_masks.py \
+        --figure mask_complement \
+        --mask_type rasterized \
+        --mask_role context \
+        --context_quadrant 0 \
+        --image_path photo.jpg
+
+    # Full-grid ColorMAE masking (kept = high-noise context, hidden = dropped):
+    python visualization/visualize_masks.py \
+        --figure mask_complement \
+        --mask_type colormae \
+        --mask_role context \
+        --image_path photo.jpg \
+        --noise_path green_noise_data_3072.npz \
+        --colormae_drop_ratio 0.75 \
+        --seed 42
 """
 
 import argparse
@@ -187,8 +212,10 @@ from PIL import Image
 from torchvision import transforms as T
 
 from src.masks.blockwise import MaskCollator as BlockwiseCollator
+from src.masks.grid import MaskCollator as GridCollator
 from src.masks.multiblock import MaskCollator as MultiblockCollator
 from src.masks.multinoise import MaskCollator as MultinoiseCollator, NormalizeBySliceMax
+from src.masks.rasterized import MaskCollator as RasterizedCollator
 from visualization.labels import (
     localized_block_size_labels,
     localized_carving_labels,
@@ -870,7 +897,8 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
                    noise_path='green_noise_data_3072.npz',
                    color_mask_ratio=0.15,
                    enc_drop_order="lowest", pred_drop_order="lowest",
-                   mask_ratio=(0.4, 0.6)):
+                   mask_ratio=(0.4, 0.6), context_quadrant=0,
+                   colormae_drop_ratio=0.75):
     """Sample context + target masks for a given mask type and seed.
 
     Returns ``(ctx_mask, target_masks)`` where *ctx_mask* is an ``[H, W]``
@@ -890,6 +918,18 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
         m = torch.randperm(num_patches, generator=g)
         ctx_mask = _indices_to_2d(m[:num_keep], H, W)
         target_masks = [_indices_to_2d(m[num_keep:], H, W)]
+
+    elif mask_type == 'grid':
+        ctx_mask, pred_mask = GridCollator(
+            input_size=(input_size, input_size),
+            patch_size=patch_size).grid_masks()
+        target_masks = [pred_mask]
+
+    elif mask_type == 'rasterized':
+        ctx_mask, target_masks = RasterizedCollator(
+            input_size=(input_size, input_size),
+            patch_size=patch_size,
+            context_quadrant=context_quadrant).quadrant_masks()
 
     elif mask_type == 'multinoise':
         collator = MultinoiseCollator(
@@ -927,6 +967,35 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
             e_size, noise_grid=noise_grid, acceptable_regions=complements,
             drop_order=enc_drop_order)
         ctx_mask = _indices_to_2d(ctx_1d, H, W)
+
+    elif mask_type == 'colormae':
+        # Full-grid ColorMAE masking: overlay color noise on the whole patch
+        # grid, then drop the lowest-noise fraction.  There is no rectangular
+        # block sampling and no separate target placements - kept (high-noise)
+        # patches form the context, dropped (low-noise) patches are the single
+        # reconstruction target.
+        if not 0.0 < colormae_drop_ratio < 1.0:
+            raise ValueError('colormae_drop_ratio must be in (0, 1)')
+        collator = MultinoiseCollator(
+            input_size=(input_size, input_size),
+            patch_size=patch_size,
+            enc_mask_scale=enc_mask_scale,
+            pred_mask_scale=pred_mask_scale,
+            aspect_ratio=aspect_ratio,
+            nenc=1, npred=npred, min_keep=min_keep,
+            allow_overlap=False,
+            color_noise_path=noise_path,
+            color_mask_ratio=color_mask_ratio,
+            enc_drop_order=enc_drop_order,
+            pred_drop_order=pred_drop_order,
+        )
+        noise_grid = collator._extract_noise_windows(1)[0].cpu().numpy()
+        full_mask = np.ones((H, W), dtype=bool)
+        kept, dropped = apply_noise_threshold(
+            full_mask, noise_grid, ratio=colormae_drop_ratio,
+            drop_order='lowest')
+        ctx_mask = torch.from_numpy(kept).to(torch.int32)
+        target_masks = [torch.from_numpy(dropped).to(torch.int32)]
 
     elif mask_type == 'blockwise':
         collator = BlockwiseCollator(
@@ -1013,7 +1082,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mask_type', type=str, default='multinoise',
                         choices=['multinoise', 'multiblock', 'compare',
-                                 'random', 'blockwise'],
+                                 'random', 'blockwise', 'grid', 'rasterized',
+                                 'colormae'],
                         help='Which mask collator to visualize '
                              '(compare = both methods on each image)')
     parser.add_argument('--figure', type=str, default='masks',
@@ -1070,6 +1140,10 @@ def main():
                              '(multinoise only): lowest or highest')
     parser.add_argument('--npred', type=int, default=4)
     parser.add_argument('--min_keep', type=int, default=10)
+    parser.add_argument('--context_quadrant', type=int, default=0,
+                        choices=[0, 1, 2, 3],
+                        help='Which quadrant is the context for '
+                             'mask_type=rasterized (0=TL, 1=TR, 2=BL, 3=BR)')
     parser.add_argument('--scale_sweep', type=float, nargs=3,
                         default=[0.15, 0.4, 0.8],
                         help='Three scale values for the Mechanic 2 scale-sweep '
@@ -1722,6 +1796,8 @@ def main():
             enc_drop_order=args.enc_drop_order,
             pred_drop_order=args.pred_drop_order,
             mask_ratio=tuple(args.mask_ratio),
+            context_quadrant=args.context_quadrant,
+            colormae_drop_ratio=args.colormae_drop_ratio,
         )
         ctx_mask, target_masks = generate_masks(args.mask_type, **mask_kwargs)
 
@@ -1753,6 +1829,7 @@ def main():
         npred=args.npred, min_keep=args.min_keep, seed=args.seed,
         noise_path=args.noise_path, color_mask_ratio=args.color_mask_ratio,
         enc_drop_order=args.enc_drop_order, pred_drop_order=args.pred_drop_order,
+        context_quadrant=args.context_quadrant,
     )
 
     # -- Which methods to show ----------------------------------------------
@@ -1774,7 +1851,7 @@ def main():
 
             panels = [(labels['original'], image),
                       (labels['context'], apply_patch_mask(image, ctx_mask, ps))]
-            for t in range(args.npred):
+            for t in range(min(args.npred, len(target_masks))):
                 panels.append(
                     (f"{labels['target_prefix']} {t + 1}",
                      apply_patch_mask(image, target_masks[t], ps)))
