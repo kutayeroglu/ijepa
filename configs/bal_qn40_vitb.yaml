@@ -14,7 +14,7 @@ data:
   use_horizontal_flip: false
 logging:
   folder: /mnt/logs/ijepa/pretraining
-  write_tag: bal_qn50_vitb
+  write_tag: bal_qn40_vitb
 mask:
   allow_overlap: false
   aspect_ratio:
@@ -32,7 +32,7 @@ mask:
   - 0.2
   noise_data_path: /mnt/green_noise_data_3072.npz
   mask_type: quadrantnoise
-  color_mask_ratio: 0.5
+  color_mask_ratio: 0.4
 meta:
   copy_data: false
   load_checkpoint: false

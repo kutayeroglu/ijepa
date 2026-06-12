@@ -1,13 +1,13 @@
 #!/bin/bash
-#SBATCH --job-name=pt-qn50-vitb
+#SBATCH --job-name=PtQn40
 #SBATCH --qos=acc_ehpc
 #SBATCH --account=etur91
 #SBATCH --time=3-00:00:00
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=80
 #SBATCH --gres=gpu:4
-#SBATCH --output=%j_pt_qn50_vitb.out
-#SBATCH --error=%j_pt_qn50_vitb.err
+#SBATCH --output=%j_pt_qn40_vitb.out
+#SBATCH --error=%j_pt_qn40_vitb.err
 #SBATCH --chdir=.
 
 set -e
@@ -22,7 +22,7 @@ source "$PROJECT_ROOT/dev/run_on_hpc/mn5/common.sh"
 export IJEPA_LAUNCHER_SCRIPT="$SCRIPT_PATH"
 
 # -- Config --
-CONFIG_NAME="bal_qn50_vitb"
+CONFIG_NAME="bal_qn40_vitb"
 CONFIG_PATH="configs/${CONFIG_NAME}.yaml"
 
 # -- Logs --
@@ -30,7 +30,7 @@ SCRATCH_DIR="/gpfs/scratch/etur91"
 REAL_LOG_PATH="$SCRATCH_DIR/logs"
 
 # -- Data --
-NOISE_FILENAME="green_noise_data_3072.npz"
+NOISE_FILENAME="blue_noise_data_3072.npz"
 NOISE_HOST_PATH="$PROJECTS_BASE/datasets/$NOISE_FILENAME"
 REAL_DATA_PATH="$PROJECTS_BASE/datasets/imagenet"
 LOCAL_DATA_DIR="$TMPDIR/imagenet"
