@@ -139,6 +139,39 @@ sampled placements; left margin labels name each row)::
         --carving_pred_scale 0.10 \
         --carving_enc_scale 0.55 \
         --color_mask_ratio 0.15
+
+Mask / complement triptych (original, kept patches, hidden patches)::
+
+    python visualization/visualize_masks.py \
+        --figure mask_complement \
+        --mask_type random \
+        --mask_role context \
+        --image_path photo.jpg \
+        --mask_ratio 0.4 0.6 \
+        --seed 42
+
+Blockwise mask / complement (training-aligned scales from bal_bw_vitb)::
+
+    python visualization/visualize_masks.py \
+        --figure mask_complement \
+        --mask_type blockwise \
+        --mask_role context \
+        --image_path photo.jpg \
+        --pred_mask_scale 0.15 0.2 \
+        --enc_mask_scale 0.85 1.0 \
+        --aspect_ratio 0.75 1.5 \
+        --seed 42
+
+    python visualization/visualize_masks.py \
+        --figure mask_complement \
+        --mask_type blockwise \
+        --mask_role target \
+        --target_index 0 \
+        --image_path photo.jpg \
+        --pred_mask_scale 0.15 0.2 \
+        --enc_mask_scale 0.85 1.0 \
+        --aspect_ratio 0.75 1.5 \
+        --seed 42
 """
 
 import argparse
@@ -153,6 +186,7 @@ from matplotlib import patches as mpatches
 from PIL import Image
 from torchvision import transforms as T
 
+from src.masks.blockwise import MaskCollator as BlockwiseCollator
 from src.masks.multiblock import MaskCollator as MultiblockCollator
 from src.masks.multinoise import MaskCollator as MultinoiseCollator, NormalizeBySliceMax
 from visualization.labels import (
@@ -160,6 +194,7 @@ from visualization.labels import (
     localized_carving_labels,
     localized_grid_labels,
     localized_labels,
+    localized_mask_complement_labels,
     localized_mask_type_label,
     localized_noise_dropout_colormae_labels,
     localized_noise_dropout_labels,
@@ -191,6 +226,21 @@ def apply_patch_mask(image: np.ndarray, mask_2d: torch.Tensor,
     for r in range(H_p):
         for c in range(W_p):
             if mask_2d[r, c]:
+                r0, c0 = r * patch_size, c * patch_size
+                out[r0:r0 + patch_size, c0:c0 + patch_size] = \
+                    image[r0:r0 + patch_size, c0:c0 + patch_size]
+    return out
+
+
+def apply_patch_mask_zero(image: np.ndarray, mask_2d: torch.Tensor,
+                          patch_size: int, fill: int = 0) -> np.ndarray:
+    """Return a copy of *image* with only selected patches visible; rest is *fill*."""
+    out = np.full(image.shape, fill, dtype=np.uint8)
+    H_p, W_p = mask_2d.shape
+    sel = mask_2d.cpu().numpy().astype(bool)
+    for r in range(H_p):
+        for c in range(W_p):
+            if sel[r, c]:
                 r0, c0 = r * patch_size, c * patch_size
                 out[r0:r0 + patch_size, c0:c0 + patch_size] = \
                     image[r0:r0 + patch_size, c0:c0 + patch_size]
@@ -819,7 +869,8 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
                    pred_mask_scale, aspect_ratio, npred, min_keep, seed,
                    noise_path='green_noise_data_3072.npz',
                    color_mask_ratio=0.15,
-                   enc_drop_order="lowest", pred_drop_order="lowest"):
+                   enc_drop_order="lowest", pred_drop_order="lowest",
+                   mask_ratio=(0.4, 0.6)):
     """Sample context + target masks for a given mask type and seed.
 
     Returns ``(ctx_mask, target_masks)`` where *ctx_mask* is an ``[H, W]``
@@ -831,7 +882,16 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
     g = torch.Generator()
     g.manual_seed(seed)
 
-    if mask_type == 'multinoise':
+    if mask_type == 'random':
+        ratio = (mask_ratio[0]
+                 + torch.rand(1, generator=g).item() * (mask_ratio[1] - mask_ratio[0]))
+        num_patches = H * W
+        num_keep = int(num_patches * (1. - ratio))
+        m = torch.randperm(num_patches, generator=g)
+        ctx_mask = _indices_to_2d(m[:num_keep], H, W)
+        target_masks = [_indices_to_2d(m[num_keep:], H, W)]
+
+    elif mask_type == 'multinoise':
         collator = MultinoiseCollator(
             input_size=(input_size, input_size),
             patch_size=patch_size,
@@ -868,6 +928,33 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
             drop_order=enc_drop_order)
         ctx_mask = _indices_to_2d(ctx_1d, H, W)
 
+    elif mask_type == 'blockwise':
+        collator = BlockwiseCollator(
+            input_size=(input_size, input_size),
+            patch_size=patch_size,
+            enc_mask_scale=enc_mask_scale,
+            pred_mask_scale=pred_mask_scale,
+            aspect_ratio=aspect_ratio,
+            nenc=1, npred=npred, min_keep=min_keep,
+            allow_overlap=False,
+        )
+        num_pred_patches = collator._sample_mask_budget(
+            generator=g, scale=collator.pred_mask_scale)
+        num_enc_patches = collator._sample_mask_budget(
+            generator=g, scale=collator.enc_mask_scale)
+
+        target_masks, complements = [], []
+        for _ in range(npred):
+            m, mc = collator._build_blockwise_mask(
+                num_pred_patches, aspect_ratio_range=collator.aspect_ratio)
+            target_masks.append(_indices_to_2d(m, H, W))
+            complements.append(mc)
+
+        ctx_1d, _ = collator._build_blockwise_mask(
+            num_enc_patches, aspect_ratio_range=(1.0, 1.0),
+            acceptable_regions=complements)
+        ctx_mask = _indices_to_2d(ctx_1d, H, W)
+
     else:  # multiblock
         collator = MultiblockCollator(
             input_size=(input_size, input_size),
@@ -898,6 +985,26 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
     return ctx_mask, target_masks
 
 
+def draw_mask_complement_figure(image: np.ndarray, kept_2d: torch.Tensor,
+                                patch_size: int, labels: dict,
+                                *, dpi: int = 300) -> plt.Figure:
+    """Build a 1×3 figure: original, masked (kept patches), complement (hidden)."""
+    visible = apply_patch_mask_zero(image, kept_2d, patch_size, fill=0)
+    complement = apply_patch_mask_zero(image, ~kept_2d.bool(), patch_size, fill=0)
+
+    fig, axes = plt.subplots(1, 3, figsize=(12, 4))
+    for ax, img_arr, title in zip(
+            axes,
+            (image, visible, complement),
+            (labels['original'], labels['masked'], labels['complement'])):
+        ax.imshow(img_arr)
+        ax.set_title(title, fontsize=11, pad=6)
+        ax.set_axis_off()
+
+    plt.subplots_adjust(wspace=0.06, left=0.02, right=0.99, top=0.90, bottom=0.02)
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -905,14 +1012,16 @@ def generate_masks(mask_type, *, input_size, patch_size, enc_mask_scale,
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--mask_type', type=str, default='multinoise',
-                        choices=['multinoise', 'multiblock', 'compare'],
+                        choices=['multinoise', 'multiblock', 'compare',
+                                 'random', 'blockwise'],
                         help='Which mask collator to visualize '
                              '(compare = both methods on each image)')
     parser.add_argument('--figure', type=str, default='masks',
                         choices=['masks', 'patch_grid', 'block_size',
                                  'placement', 'noise_dropout',
                                  'noise_dropout_colormae',
-                                 'noise_transform', 'carving', 'carving_extended'],
+                                 'noise_transform', 'carving', 'carving_extended',
+                                 'mask_complement'],
                         help='Which figure to generate: '
                              '"masks" (current behavior, mask panels), '
                              '"patch_grid" (Mechanic 1: image + grid overlay), '
@@ -929,7 +1038,8 @@ def main():
                              'overlap removal), or "carving_extended" '
                              '(Mechanic 4 + second row for multinoise: '
                              'noise-thresholded targets and patch-accurate '
-                             'complements)')
+                             'complements), or "mask_complement" '
+                             '(original / masked / complement triptych)')
     parser.add_argument('--image_path', type=str, nargs='+', required=True,
                         help='Path(s) to input image(s) (JPEG/PNG)')
     parser.add_argument('--noise_path', type=str,
@@ -937,7 +1047,7 @@ def main():
                         help='Path to color-noise .npz file (multinoise only)')
     parser.add_argument('--output_dir', type=str, default=None,
                         help='Output directory; defaults to '
-                             'visualization/<timestamp>_<figure>_seed<N>/')
+                             'visualization/<timestamp>_<figure>_<mask_type>_seed<N>/')
     parser.add_argument('--seed', type=int, default=42)
     parser.add_argument('--input_size', type=int, default=224)
     parser.add_argument('--patch_size', type=int, default=16)
@@ -994,6 +1104,17 @@ def main():
                         help='Context-block scale used for the Mechanic 4 '
                              'figure (kept smaller than training defaults '
                              'so candidate/target overlap is visible)')
+    parser.add_argument('--mask_role', type=str, default='context',
+                        choices=['context', 'target'],
+                        help='Which mask to show in figure=mask_complement '
+                             '(context encoder mask or a target mask)')
+    parser.add_argument('--target_index', type=int, default=0,
+                        help='Target mask index when --mask_role=target '
+                             '(figure=mask_complement only)')
+    parser.add_argument('--mask_ratio', type=float, nargs=2,
+                        default=[0.4, 0.6],
+                        help='Fraction of patches to mask for mask_type=random '
+                             '(figure=mask_complement)')
     parser.add_argument('--dpi', type=int, default=300)
     parser.add_argument('--turkish', action='store_true',
                         help='Use Turkish labels in panel titles '
@@ -1004,7 +1125,7 @@ def main():
     if args.output_dir is None:
         script_dir = Path(__file__).resolve().parent
         stamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        out_dir = script_dir / f'{stamp}_{args.figure}_seed{args.seed}'
+        out_dir = script_dir / f'{stamp}_{args.figure}_{args.mask_type}_seed{args.seed}'
     else:
         out_dir = Path(args.output_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -1562,22 +1683,63 @@ def main():
             axes[1, 3], image, ps, targets, candidate, final_carved)
         axes[1, 3].set_title(cv_labels['final'], fontsize=11, pad=4)
 
+        plt.subplots_adjust(wspace=0.06, hspace=0.12,
+                            left=0.085, right=0.99, top=0.92, bottom=0.09)
+
         fig.text(0.5, 0.04, cv_labels['caption'],
                  ha='center', fontsize=9, style='italic', color='#34495e')
 
         side_kw = dict(
             rotation=90, va='center', ha='right',
-            fontsize=16, fontweight='semibold', color='#2c3e50')
-        fig.text(0.078, 0.72,
-                 localized_mask_type_label('multiblock', args.turkish), **side_kw)
-        fig.text(0.078, 0.34,
-                 localized_mask_type_label('multinoise', args.turkish), **side_kw)
-
-        plt.subplots_adjust(wspace=0.06, hspace=0.12,
-                            left=0.085, right=0.99, top=0.92, bottom=0.09)
+            fontsize=16, fontweight='semibold', color='#2c3e50',
+            transform=fig.transFigure)
+        for row, mask_type in enumerate(('multiblock', 'multinoise')):
+            pos = axes[row, 0].get_position()
+            fig.text(
+                pos.x0 - 0.008, 0.5 * (pos.y0 + pos.y1),
+                localized_mask_type_label(mask_type, args.turkish),
+                **side_kw)
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic4_carving_extended.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
+
+    # -- Mask / complement triptych (original, kept, hidden) -----------------
+    if args.figure == 'mask_complement':
+        img_path = args.image_path[0]
+        image = load_image(img_path, args.input_size)
+
+        mask_kwargs = dict(
+            input_size=args.input_size, patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            npred=args.npred, min_keep=args.min_keep, seed=args.seed,
+            noise_path=args.noise_path, color_mask_ratio=args.color_mask_ratio,
+            enc_drop_order=args.enc_drop_order,
+            pred_drop_order=args.pred_drop_order,
+            mask_ratio=tuple(args.mask_ratio),
+        )
+        ctx_mask, target_masks = generate_masks(args.mask_type, **mask_kwargs)
+
+        if args.mask_role == 'context':
+            kept_2d = ctx_mask.bool()
+        else:
+            if args.target_index < 0 or args.target_index >= len(target_masks):
+                parser.error(
+                    f'--target_index must be in [0, {len(target_masks) - 1}] '
+                    f'for mask_type={args.mask_type!r}, got {args.target_index}')
+            kept_2d = target_masks[args.target_index].bool()
+
+        mc_labels = localized_mask_complement_labels(args.turkish)
+        fig = draw_mask_complement_figure(
+            image, kept_2d, ps, mc_labels, dpi=args.dpi)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'mask_complement.{ext}'
             fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
             print(f'Saved {path.resolve()}')
         plt.close(fig)

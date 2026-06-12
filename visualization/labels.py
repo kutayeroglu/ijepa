@@ -3,11 +3,15 @@
 EN_MASK_TYPE_LABELS = {
     'multinoise': 'Multi-noise',
     'multiblock': 'Multi-block',
+    'random': 'Random',
+    'blockwise': 'Block-wise',
 }
 
 TR_MASK_TYPE_LABELS = {
     'multinoise': 'Çoklu-Gürültü',
     'multiblock': 'Çoklu-Blok',
+    'random': 'Rastgele',
+    'blockwise': 'Blok-bazlı',
 }
 
 
@@ -197,6 +201,21 @@ def localized_noise_transform_labels(turkish: bool):
             '+ NormalizeBySliceMax',
         ],
         'flip_caption': 'applied with p=0.5',
+    }
+
+
+def localized_mask_complement_labels(turkish: bool):
+    """Return panel labels for the mask/complement figure."""
+    if turkish:
+        return {
+            'original': 'Girdi',
+            'masked': 'Maskeli (Bağlam)',
+            'complement': 'Tümleyen (Hedef)',
+        }
+    return {
+        'original': 'Original',
+        'masked': 'Masked (Context)',
+        'complement': 'Complement (Target)',
     }
 
 
