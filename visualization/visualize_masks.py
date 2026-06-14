@@ -197,6 +197,29 @@ Blockwise mask / complement (training-aligned scales from bal_bw_vitb)::
         --noise_path green_noise_data_3072.npz \
         --colormae_drop_ratio 0.75 \
         --seed 42
+
+Multi-block masking (2–4 images; original / context / targets grid)::
+
+    python visualization/visualize_masks.py \
+        --figure multiblock_masking \
+        --image_path photo1.jpg photo2.jpg photo3.jpg photo4.jpg \
+        --pred_mask_scale 0.15 0.2 \
+        --enc_mask_scale 0.85 1.0 \
+        --seed 42
+
+Noise-color comparison (1–2 images; rows = green/blue/red/purple noise)::
+
+    python visualization/visualize_masks.py \
+        --figure noise_color_compare \
+        --image_path photo.jpg
+
+    python visualization/visualize_masks.py \
+        --figure noise_color_compare \
+        --image_path photo1.jpg photo2.jpg \
+        --pred_mask_scale 0.15 0.2 \
+        --enc_mask_scale 0.85 1.0 \
+        --color_mask_ratio 0.4 \
+        --seed 42
 """
 
 import argparse
@@ -222,7 +245,9 @@ from visualization.labels import (
     localized_grid_labels,
     localized_labels,
     localized_mask_complement_labels,
+    localized_multiblock_masking_labels,
     localized_mask_type_label,
+    localized_noise_color_label,
     localized_noise_dropout_colormae_labels,
     localized_noise_dropout_labels,
     localized_noise_transform_labels,
@@ -236,6 +261,58 @@ from visualization.labels import (
 # ---------------------------------------------------------------------------
 
 DIM_ALPHA = 0.40
+
+TARGET_BLOCK_OUTLINE_COLORS = [
+    '#e74c3c', '#3498db', '#f1c40f', '#9b59b6', '#1abc9c', '#e67e22',
+]
+TARGET_BLOCK_FILL_RGBA = [
+    (0.91, 0.30, 0.24, 0.48),
+    (0.20, 0.55, 0.86, 0.45),
+    (0.95, 0.77, 0.06, 0.42),
+    (0.61, 0.35, 0.71, 0.45),
+    (0.10, 0.74, 0.61, 0.42),
+    (0.90, 0.49, 0.13, 0.42),
+]
+CONTEXT_CARVED_RGBA = (0.16, 0.50, 0.73, 0.55)
+
+NOISE_DATA_DIR = Path('~/datasets').expanduser()
+
+DEFAULT_NOISE_COLOR_SPECS = (
+    ('green', str(NOISE_DATA_DIR / 'green_noise_data_3072.npz')),
+    ('blue', str(NOISE_DATA_DIR / 'blue_noise_data_3072.npz')),
+    ('red', str(NOISE_DATA_DIR / 'red_noise_data_3072.npz')),
+    ('purple', str(NOISE_DATA_DIR / 'purple_noise_data_3072.npz')),
+)
+
+NOISE_COLOR_ROW_COLORS = {
+    'green': '#27ae60',
+    'blue': '#3498db',
+    'red': '#e74c3c',
+    'purple': '#9b59b6',
+}
+
+
+def _mask_to_bounding_rect(mask_2d: np.ndarray) -> tuple[int, int, int, int] | None:
+    """Return ``(top, left, h, w)`` patch coords covering all True cells."""
+    idx = np.argwhere(mask_2d.astype(bool))
+    if len(idx) == 0:
+        return None
+    rows, cols = idx[:, 0], idx[:, 1]
+    top, left = int(rows.min()), int(cols.min())
+    return (top, left,
+            int(rows.max()) - top + 1,
+            int(cols.max()) - left + 1)
+
+
+def _masks_to_bounding_rects(masks) -> list[tuple[int, int, int, int]]:
+    rects: list[tuple[int, int, int, int]] = []
+    for mask in masks:
+        arr = (mask.numpy().astype(bool) if isinstance(mask, torch.Tensor)
+               else np.asarray(mask, dtype=bool))
+        rect = _mask_to_bounding_rect(arr)
+        if rect is not None:
+            rects.append(rect)
+    return rects
 
 
 def _indices_to_2d(mask_1d: torch.Tensor, H: int, W: int) -> torch.Tensor:
@@ -1074,6 +1151,182 @@ def draw_mask_complement_figure(image: np.ndarray, kept_2d: torch.Tensor,
     return fig
 
 
+def draw_multiblock_targets_panel(
+        ax, image: np.ndarray, patch_size: int,
+        target_masks: list[torch.Tensor],
+        outline_colors: list[str] | None = None,
+        fill_rgba: list[tuple[float, float, float, float]] | None = None):
+    """Dimmed image + four target blocks with distinct fills and outlines."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+    if outline_colors is None:
+        outline_colors = TARGET_BLOCK_OUTLINE_COLORS
+    if fill_rgba is None:
+        fill_rgba = TARGET_BLOCK_FILL_RGBA
+    for i, tm in enumerate(target_masks):
+        kept = tm.numpy().astype(bool)
+        _add_per_patch_overlay(
+            ax, patch_size, kept, fill_rgba[i % len(fill_rgba)])
+    for i, rect in enumerate(_masks_to_bounding_rects(target_masks)):
+        _add_block_outlines(
+            ax, patch_size, [rect],
+            color=outline_colors[i % len(outline_colors)],
+            labels=[f'T{i + 1}'])
+    ax.set_axis_off()
+
+
+def draw_multiblock_single_target_panel(
+        ax, image: np.ndarray, patch_size: int,
+        target_mask: torch.Tensor, target_index: int):
+    """Dimmed image + one target block with distinct fill and outline."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+    kept = target_mask.numpy().astype(bool)
+    _add_per_patch_overlay(
+        ax, patch_size, kept,
+        TARGET_BLOCK_FILL_RGBA[target_index % len(TARGET_BLOCK_FILL_RGBA)])
+    rect = _mask_to_bounding_rect(kept)
+    if rect is not None:
+        _add_block_outlines(
+            ax, patch_size, [rect],
+            color=TARGET_BLOCK_OUTLINE_COLORS[
+                target_index % len(TARGET_BLOCK_OUTLINE_COLORS)],
+            labels=[f'T{target_index + 1}'])
+    ax.set_axis_off()
+
+
+def draw_multiblock_context_panel(
+        ax, image: np.ndarray, patch_size: int,
+        ctx_mask: torch.Tensor,
+        ctx_rgba: tuple[float, float, float, float] = CONTEXT_CARVED_RGBA):
+    """Dimmed image + carved context patches (may be irregular after overlap)."""
+    dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
+    _draw_grid_lines(ax, dimmed, patch_size)
+    _add_per_patch_overlay(ax, patch_size, ctx_mask.numpy().astype(bool), ctx_rgba)
+    ax.set_axis_off()
+
+
+def draw_multiblock_masking_figure(
+        images: list[np.ndarray],
+        patch_size: int,
+        mask_kwargs: dict,
+        labels: dict,
+        *,
+        max_images: int = 4,
+        dpi: int = 300) -> plt.Figure:
+    """Build an N×6 figure: original | context | target 1–4 for each image."""
+    entries = images[:max_images]
+    n_rows = len(entries)
+    n_targets = mask_kwargs.get('npred', 4)
+    n_cols = 2 + n_targets
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(3.2 * n_cols, 3.2 * n_rows), squeeze=False)
+
+    for row, image in enumerate(entries):
+        row_kwargs = dict(mask_kwargs)
+        row_kwargs['seed'] = mask_kwargs['seed'] + row
+        ctx_mask, target_masks = generate_masks('multiblock', **row_kwargs)
+
+        axes[row, 0].imshow(image)
+        axes[row, 0].set_axis_off()
+        draw_multiblock_context_panel(
+            axes[row, 1], image, patch_size, ctx_mask)
+        for t, target_mask in enumerate(target_masks[:n_targets]):
+            draw_multiblock_single_target_panel(
+                axes[row, 2 + t], image, patch_size, target_mask, t)
+
+        if row == 0:
+            axes[row, 0].set_title(labels['original'], fontsize=12, pad=6)
+            axes[row, 1].set_title(labels['context'], fontsize=12, pad=6)
+
+    plt.subplots_adjust(wspace=0.06, hspace=0.06,
+                        left=0.02, right=0.99, top=0.88, bottom=0.02)
+
+    if n_rows > 0 and n_targets > 0:
+        pos_left = axes[0, 2].get_position()
+        pos_right = axes[0, 2 + n_targets - 1].get_position()
+        fig.text(
+            0.5 * (pos_left.x0 + pos_right.x1),
+            pos_left.y1 + 0.015,
+            labels['targets'],
+            ha='center', va='bottom', fontsize=12)
+
+    return fig
+
+
+def _noise_color_compare_rows(
+        image: np.ndarray,
+        patch_size: int,
+        mask_kwargs: dict,
+        noise_specs: tuple[tuple[str, str], ...],
+        labels: dict) -> list[tuple[str, list[tuple[str, np.ndarray]]]]:
+    """Return one figure row per noise color for a single image."""
+    rows = []
+    for color_key, noise_path in noise_specs:
+        row_kwargs = dict(mask_kwargs)
+        row_kwargs['noise_path'] = noise_path
+        ctx_mask, target_masks = generate_masks('multinoise', **row_kwargs)
+        panels = [
+            (labels['original'], image),
+            (labels['context'], apply_patch_mask(image, ctx_mask, patch_size)),
+        ]
+        for t in range(min(mask_kwargs['npred'], len(target_masks))):
+            panels.append(
+                (f"{labels['target_prefix']} {t + 1}",
+                 apply_patch_mask(image, target_masks[t], patch_size)))
+        rows.append((color_key, panels))
+    return rows
+
+
+def draw_noise_color_compare_figure(
+        images: list[np.ndarray],
+        patch_size: int,
+        mask_kwargs: dict,
+        noise_specs: tuple[tuple[str, str], ...],
+        labels: dict,
+        *,
+        turkish: bool = False) -> plt.Figure:
+    """Build a figure comparing multinoise masks across noise colors.
+
+    One image: 4×6 (noise color × panels). Two images: 8×6 (stacked blocks).
+    """
+    all_rows: list[tuple[str, list[tuple[str, np.ndarray]]]] = []
+    for img_idx, image in enumerate(images):
+        img_kwargs = dict(mask_kwargs)
+        img_kwargs['seed'] = mask_kwargs['seed'] + img_idx
+        all_rows.extend(
+            _noise_color_compare_rows(
+                image, patch_size, img_kwargs, noise_specs, labels))
+
+    n_rows = len(all_rows)
+    n_cols = len(all_rows[0][1])
+    fig, axes = plt.subplots(
+        n_rows, n_cols, figsize=(3.5 * n_cols, 3.5 * n_rows), squeeze=False)
+
+    for row_idx, (color_key, panels) in enumerate(all_rows):
+        for col_idx, (name, img_arr) in enumerate(panels):
+            ax = axes[row_idx, col_idx]
+            ax.imshow(img_arr)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for spine in ax.spines.values():
+                spine.set_visible(False)
+            if row_idx == 0:
+                ax.set_title(name, fontsize=14, pad=8)
+
+        axes[row_idx, 0].text(
+            -0.08, 0.5, localized_noise_color_label(color_key, turkish),
+            transform=axes[row_idx, 0].transAxes,
+            va='center', ha='right',
+            fontsize=15, fontweight='bold', rotation=90,
+            color=NOISE_COLOR_ROW_COLORS.get(color_key, 'black'))
+
+    plt.subplots_adjust(wspace=0.06, hspace=0.10,
+                        left=0.06, right=0.995,
+                        top=0.94, bottom=0.02)
+    return fig
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -1091,7 +1344,8 @@ def main():
                                  'placement', 'noise_dropout',
                                  'noise_dropout_colormae',
                                  'noise_transform', 'carving', 'carving_extended',
-                                 'mask_complement'],
+                                 'mask_complement', 'multiblock_masking',
+                                 'noise_color_compare'],
                         help='Which figure to generate: '
                              '"masks" (current behavior, mask panels), '
                              '"patch_grid" (Mechanic 1: image + grid overlay), '
@@ -1109,12 +1363,21 @@ def main():
                              '(Mechanic 4 + second row for multinoise: '
                              'noise-thresholded targets and patch-accurate '
                              'complements), or "mask_complement" '
-                             '(original / masked / complement triptych)')
+                             '(original / masked / complement triptych), or '
+                             '"multiblock_masking" (2–4 images: original, '
+                             'context, and individual target panels), or '
+                             '"noise_color_compare" (1–2 images: multinoise '
+                             'masks for green/blue/red/purple noise)')
     parser.add_argument('--image_path', type=str, nargs='+', required=True,
                         help='Path(s) to input image(s) (JPEG/PNG)')
     parser.add_argument('--noise_path', type=str,
-                        default='green_noise_data_3072.npz',
-                        help='Path to color-noise .npz file (multinoise only)')
+                        default=str(NOISE_DATA_DIR / 'green_noise_data_3072.npz'),
+                        help='Path to color-noise .npz file (multinoise only; '
+                             f'default: {NOISE_DATA_DIR}/green_noise_data_3072.npz)')
+    parser.add_argument('--noise_paths', type=str, nargs='+', default=None,
+                        help='Four noise .npz paths for --figure '
+                             'noise_color_compare (green, blue, red, purple; '
+                             f'defaults under {NOISE_DATA_DIR})')
     parser.add_argument('--output_dir', type=str, default=None,
                         help='Output directory; defaults to '
                              'visualization/<timestamp>_<figure>_<mask_type>_seed<N>/')
@@ -1274,24 +1537,13 @@ def main():
             npred=args.npred, min_keep=args.min_keep, seed=args.seed)
         dimmed = (image.astype(np.float32) * DIM_ALPHA).astype(np.uint8)
         _draw_grid_lines(ax_sample, dimmed, ps)
-        ctx_rgba = (0.16, 0.50, 0.73, 0.50)
         _add_per_patch_overlay(
-            ax_sample, ps, ctx_mask.numpy().astype(bool), ctx_rgba)
-        targets = []
-        for tm in target_masks:
-            idx = np.argwhere(tm.numpy().astype(bool))
-            if len(idx):
-                rows, cols = idx[:, 0], idx[:, 1]
-                top, left = int(rows.min()), int(cols.min())
-                targets.append((top, left,
-                                int(rows.max()) - top + 1,
-                                int(cols.max()) - left + 1))
-        target_colors = ['#e74c3c', '#27ae60', '#f1c40f', '#9b59b6',
-                         '#1abc9c', '#e67e22']
+            ax_sample, ps, ctx_mask.numpy().astype(bool), CONTEXT_CARVED_RGBA)
+        targets = _masks_to_bounding_rects(target_masks)
         for i, rect in enumerate(targets):
             _add_block_outlines(
                 ax_sample, ps, [rect],
-                color=target_colors[i % len(target_colors)],
+                color=TARGET_BLOCK_OUTLINE_COLORS[i % len(TARGET_BLOCK_OUTLINE_COLORS)],
                 labels=[f'T{i + 1}'])
         ax_sample.set_axis_off()
         ax_sample.set_title(
@@ -1776,6 +2028,68 @@ def main():
 
         for ext in ('png', 'pdf'):
             path = out_dir / f'mechanic4_carving_extended.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
+
+    # -- Multi-block masking (original / context / targets, 2–4 images) ----
+    if args.figure == 'multiblock_masking':
+        images = [load_image(p, args.input_size) for p in args.image_path[:4]]
+        mb_labels = localized_multiblock_masking_labels(args.turkish)
+        mask_kwargs = dict(
+            input_size=args.input_size, patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            npred=args.npred, min_keep=args.min_keep, seed=args.seed,
+        )
+        fig = draw_multiblock_masking_figure(
+            images, ps, mask_kwargs, mb_labels, dpi=args.dpi)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'multiblock_masking.{ext}'
+            fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
+            print(f'Saved {path.resolve()}')
+        plt.close(fig)
+        return
+
+    # -- Noise-color comparison (multinoise masks across color patterns) ----
+    if args.figure == 'noise_color_compare':
+        if len(args.image_path) > 2:
+            parser.error(
+                '--figure noise_color_compare accepts at most 2 --image_path '
+                'values')
+        if args.noise_paths is not None and len(args.noise_paths) != 4:
+            parser.error(
+                '--noise_paths requires exactly 4 paths '
+                '(green, blue, red, purple)')
+        noise_specs = (
+            tuple(zip(
+                [spec[0] for spec in DEFAULT_NOISE_COLOR_SPECS],
+                args.noise_paths))
+            if args.noise_paths is not None
+            else DEFAULT_NOISE_COLOR_SPECS
+        )
+
+        images = [load_image(p, args.input_size) for p in args.image_path[:2]]
+        mask_kwargs = dict(
+            input_size=args.input_size, patch_size=ps,
+            enc_mask_scale=tuple(args.enc_mask_scale),
+            pred_mask_scale=tuple(args.pred_mask_scale),
+            aspect_ratio=tuple(args.aspect_ratio),
+            npred=args.npred, min_keep=args.min_keep, seed=args.seed,
+            color_mask_ratio=args.color_mask_ratio,
+            enc_drop_order=args.enc_drop_order,
+            pred_drop_order=args.pred_drop_order,
+        )
+        labels = localized_labels(args.turkish)
+        fig = draw_noise_color_compare_figure(
+            images, ps, mask_kwargs, noise_specs, labels,
+            turkish=args.turkish)
+
+        for ext in ('png', 'pdf'):
+            path = out_dir / f'noise_color_compare.{ext}'
             fig.savefig(str(path), dpi=args.dpi, bbox_inches='tight')
             print(f'Saved {path.resolve()}')
         plt.close(fig)
